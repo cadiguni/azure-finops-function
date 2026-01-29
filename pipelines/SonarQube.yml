@@ -1,0 +1,35 @@
+trigger: none
+
+variables:
+  - group: 'SonarQube'
+  - template: config.yml
+  - name: projectKey
+    value: 'NAP_GVmodeloExemplo-back_5976d38f-1ef3-46a6-80a6-5659011c983d'
+  - name: projectName
+    value: 'GVmodeloExemplo-back'
+
+steps:
+ # Checkout the repository 
+- checkout: self
+
+ # Disable shallow fetch
+  fetchDepth: 0
+
+# Prepare Analysis Configuration task
+- task: SonarQubePrepare@7
+  inputs:
+    SonarQube: $(SERVICE_CONNECT_AZURE_TO_SONARQUBE)
+    scannerMode: 'dotnet'
+    projectKey: '$(projectKey)'
+
+# Dotnet build task
+- task: DotNetCoreCLI@2
+  displayName: 'dotnet build'
+
+# Run Code Analysis task
+- task: SonarQubeAnalyze@7
+
+# Publish Quality Gate Result task
+- task: SonarQubePublish@7
+  inputs:
+    pollingTimeoutSec: '300'

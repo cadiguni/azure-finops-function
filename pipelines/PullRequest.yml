@@ -1,0 +1,13 @@
+trigger: none
+
+pool: GVDASA-DOCKER-SB
+
+resources:
+  repositories:
+    - repository: DEVOPS
+      type: git
+      name: NAP/_git/DevOps
+      ref: 'refs/tags/v2.0.7'
+
+stages:
+  - template: ./cs-net/pipelineTemplate-pullRequest.yml@DEVOPS

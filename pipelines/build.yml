@@ -1,0 +1,41 @@
+trigger:
+  branches:
+    include:
+      - develop
+      - release/homolog
+      - master
+
+  paths:
+    include:
+      - src
+    exclude:
+    - 'wiki/*'
+    - 'pipelines/*'
+
+variables:
+  - template: config.yml
+
+parameters:
+  - name: BUILD_CONFIGURATION
+    default: Release
+    values:
+    - Release
+    - Debug
+    displayName: Configuração de compilação
+
+resources:
+  repositories:
+  - repository: DEVOPS
+    type: git
+    name: NAP/_git/DevOps
+    ref: 'refs/heads/version4'
+
+pool: azp-gvdasa-full-01
+
+stages:
+  - template: cs-net\pipelineTemplate-build.yml@DEVOPS
+    parameters:
+      name: '${{ variables.ArtifactName }}'
+      gitversion: '5.10.1'
+      pathproj: '**/*.csproj'
+      buildConfiguration: ${{ parameters.BUILD_CONFIGURATION }}

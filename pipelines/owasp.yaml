@@ -1,0 +1,35 @@
+trigger:
+  branches:
+    include:
+      - develop
+      - release/homolog
+      #- master
+  paths:
+    include:
+      # Arquivos de solução e projeto
+      - 'src/**/*.csproj'
+    exclude:
+      - 'wiki/*'
+      - 'pipelines/*'
+      - '**/bin/**'
+      - '**/obj/**'
+      - '**/TestResults/**'
+      - '**/coverage/**'
+
+variables:
+  - template: config.yml
+
+resources:
+  repositories:
+    - repository: OWASP
+      type: git
+      name: NAP/_git/OWASP-template
+      ref: 'refs/heads/main'
+
+pool: GVDASA-DOCKER-SB
+
+stages:
+  - template: ./templateOWASP-Back.yaml@OWASP
+    parameters:
+      name: '${{ variables.ArtifactName }}'
+      failOnCVSS: "11"

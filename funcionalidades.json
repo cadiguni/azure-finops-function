@@ -1,0 +1,34 @@
+{
+  "idProduto": "gvmodeloexemploapi",
+  "modulos": [
+    {
+      "id": "geral",
+      "nome": "Geral (Nome do módulo visível em tela)",
+      "funcionalidades": [
+        {
+          "id": "exemplos",
+          "nome": "Exemplos (Nome da funcionalidade visível em tela)",
+          "descricao": "Cadastro de exemplos (Uma descrição sobre o que a funcionalidade representa)",
+          "operacoes": [
+            {
+              "id": "incluir",
+              "nome": "Incluir (Nome da operação visível em tela)"
+            },
+            {
+              "id": "editar",
+              "nome": "Editar"
+            },
+            {
+              "id": "excluir",
+              "nome": "Excluir"
+            },
+            {
+              "id": "consultar",
+              "nome": "Consultar"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

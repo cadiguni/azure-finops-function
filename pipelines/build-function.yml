@@ -1,0 +1,60 @@
+trigger: none
+
+variables:
+  - template: config.yml
+
+pool: azp-gvdasa-be-01
+
+stages:
+  - stage: 'Build_function'
+    displayName: 'Build function'
+    jobs:
+    - job: 'Build'
+      displayName: 'Build'
+
+      steps:
+      - task: NuGetToolInstaller@1
+        displayName: 'Instalar Nuget'
+
+      - task: DotNetCoreCLI@2
+        displayName: Restore
+        inputs:
+          command: restore
+          feedsToUse: 'select'
+          vstsFeed: 'Feed_NAP'
+          includeNuGetOrg: true
+          projects: |
+            src/Gvdasa.GVmodeloexemploapi.WebApi/Gvdasa.GVmodeloexemploapi.WebApi.csproj
+            src/Gvdasa.GVmodeloexemploapi.Domain/Gvdasa.GVmodeloexemploapi.Domain.csproj
+            src/Gvdasa.GVmodeloexemploapi.Infra/Gvdasa.GVmodeloexemploapi.Infra.csproj
+            src/Gvdasa.GVmodeloexemploapi.Modelos/Gvdasa.GVmodeloexemploapi.Modelos.csproj
+
+      - task: DotNetCoreCLI@2
+        displayName: Build
+        inputs:
+          arguments: '--configuration Release'
+          feedsToUse: 'select'
+          vstsFeed: 'Feed_NAP'
+          includeNuGetOrg: true
+          projects: |
+            src/Gvdasa.GVmodeloexemploapi.WebApi/Gvdasa.GVmodeloexemploapi.WebApi.csproj
+            src/Gvdasa.GVmodeloexemploapi.Domain/Gvdasa.GVmodeloexemploapi.Domain.csproj
+            src/Gvdasa.GVmodeloexemploapi.Infra/Gvdasa.GVmodeloexemploapi.Infra.csproj
+            src/Gvdasa.GVmodeloexemploapi.Modelos/Gvdasa.GVmodeloexemploapi.Modelos.csproj
+
+      - task: DotNetCoreCLI@2
+        displayName: Publish
+        inputs:
+          command: publish
+          publishWebProjects: false
+          feedsToUse: 'select'
+          vstsFeed: 'Feed_NAP'
+          includeNuGetOrg: true
+          projects: 'src/Gvdasa.GVmodeloexemploapi.WebApi/Gvdasa.GVmodeloexemploapi.WebApi.csproj'
+          arguments: '--configuration Release --output $(build.artifactstagingdirectory)'
+
+      - task: PublishBuildArtifacts@1
+        displayName: 'Publish Artifact'
+        inputs:
+          PathtoPublish: '$(build.artifactstagingdirectory)'
+          ArtifactName: '${{ variables.ArtifactName }}'

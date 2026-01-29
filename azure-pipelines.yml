@@ -1,0 +1,318 @@
+# Azure DevOps Pipeline Principal
+# Seguindo padrão EDUmessenger-Backend
+
+trigger:
+  branches:
+    include:
+      - develop
+      - release/homolog
+      - master
+  paths:
+    include:
+      - src
+    exclude:
+    - 'wiki/*'
+    - 'pipelines/*'
+
+variables:
+  - template: pipelines/config.yml
+
+parameters:
+  - name: BUILD_CONFIGURATION
+    default: Release
+    values:
+    - Release
+    - Debug
+    displayName: Configuração de compilação
+
+resources:
+  repositories:
+  - repository: DEVOPS
+    type: git
+    name: NAP/_git/DevOps
+    ref: 'refs/tags/v3.0.3'
+
+pool: azp-gvdasa-be-01
+
+stages:
+  - template: cs-net\pipelineTemplate-build.yml@DEVOPS
+    parameters:
+      name: '${{ variables.ArtifactName }}'
+      gitversion: '5.10.1'
+      pathproj: '**/*.csproj'
+      buildConfiguration: ${{ parameters.BUILD_CONFIGURATION }}
+
+stages:
+- stage: Build
+  displayName: 'Build Stage'
+  jobs:
+  - job: Build
+    displayName: 'Build Cost Optimizer Function'
+    pool:
+      vmImage: 'ubuntu-latest'
+
+    steps:
+    - checkout: self
+      displayName: 'Checkout Repository'
+
+    - task: UseDotNet@2
+      displayName: 'Setup .NET SDK'
+      inputs:
+        packageType: 'sdk'
+        version: $(dotNetVersion)
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Restore NuGet Packages'
+      inputs:
+        command: 'restore'
+        projects: '$(functionAppPath)**/*.csproj'
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Build Application'
+      inputs:
+        command: 'build'
+        projects: '$(functionAppPath)**/*.csproj'
+        arguments: '--configuration $(buildConfiguration) --no-restore'
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Run Unit Tests'
+      inputs:
+        command: 'test'
+        projects: 'tests/**/*.csproj'
+        arguments: '--configuration $(buildConfiguration) --collect:"XPlat Code Coverage" --no-build'
+        publishTestResults: true
+
+    - task: DotNetCoreCLI@2
+      displayName: 'Publish Function App'
+      inputs:
+        command: 'publish'
+        projects: '$(functionAppPath)Gvdasa.GVmodeloexemploapi.WebApi/Gvdasa.GVmodeloexemploapi.WebApi.csproj'
+        arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)/function-app --no-build'
+        publishWebProjects: false
+
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish Function Artifact'
+      inputs:
+        pathToPublish: '$(Build.ArtifactStagingDirectory)/function-app'
+        artifactName: 'function-app'
+
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish Terraform Files'
+      inputs:
+        pathToPublish: 'pipelines/terraform'
+        artifactName: 'terraform'
+
+- stage: Infrastructure
+  displayName: 'Infrastructure Deployment'
+  dependsOn: Build
+  condition: succeeded()
+  jobs:
+  - deployment: DeployInfrastructure
+    displayName: 'Deploy Infrastructure'
+    pool:
+      vmImage: 'ubuntu-latest'
+    environment: $(Environment)
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: none
+
+          - download: current
+            artifact: terraform
+            displayName: 'Download Terraform Artifacts'
+
+          - task: TerraformInstaller@1
+            displayName: 'Install Terraform'
+            inputs:
+              terraformVersion: 'latest'
+
+          - task: AzureCLI@2
+            displayName: 'Terraform Init'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                cd $(Pipeline.Workspace)/terraform
+                
+                # Configure Terraform backend
+                terraform init \
+                  -backend-config="resource_group_name=rg-terraform-state" \
+                  -backend-config="storage_account_name=stterraformstate001" \
+                  -backend-config="container_name=tfstate" \
+                  -backend-config="key=cost-optimizer-$(Environment).tfstate"
+
+          - task: AzureCLI@2
+            displayName: 'Terraform Plan'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                cd $(Pipeline.Workspace)/terraform
+                
+                terraform workspace select $(terraformWorkspace) || terraform workspace new $(terraformWorkspace)
+                
+                terraform plan \
+                  -var="environment=$(Environment)" \
+                  -var="resource_group_name=$(resourceGroupName)" \
+                  -var="function_app_name=$(functionAppName)" \
+                  -out=tfplan
+
+          - task: AzureCLI@2
+            displayName: 'Terraform Apply'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                cd $(Pipeline.Workspace)/terraform
+                terraform apply tfplan
+
+          - task: AzureCLI@2
+            displayName: 'Capture Terraform Outputs'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                cd $(Pipeline.Workspace)/terraform
+                
+                echo "##vso[task.setvariable variable=functionAppName;isOutput=true]$(terraform output -raw function_app_name)"
+                echo "##vso[task.setvariable variable=resourceGroupName;isOutput=true]$(terraform output -raw resource_group_name)"
+                echo "##vso[task.setvariable variable=managedIdentityId;isOutput=true]$(terraform output -raw managed_identity_id)"
+            name: 'terraformOutputs'
+
+- stage: Deploy
+  displayName: 'Application Deployment'
+  dependsOn: Infrastructure
+  condition: succeeded()
+  variables:
+    functionAppName: $[ stageDependencies.Infrastructure.DeployInfrastructure.outputs['terraformOutputs.functionAppName'] ]
+    resourceGroupName: $[ stageDependencies.Infrastructure.DeployInfrastructure.outputs['terraformOutputs.resourceGroupName'] ]
+  jobs:
+  - deployment: DeployFunction
+    displayName: 'Deploy Function App'
+    pool:
+      vmImage: 'ubuntu-latest'
+    environment: $(Environment)
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - checkout: none
+
+          - download: current
+            artifact: function-app
+            displayName: 'Download Function App Artifacts'
+
+          - task: AzureFunctionApp@2
+            displayName: 'Deploy Azure Function'
+            inputs:
+              connectedServiceNameARM: $(azureServiceConnection)
+              appType: 'functionAppLinux'
+              appName: $(functionAppName)
+              resourceGroupName: $(resourceGroupName)
+              package: '$(Pipeline.Workspace)/function-app/**/*.zip'
+              runtimeStack: 'DOTNET-ISOLATED|8.0'
+              deploymentMethod: 'zipDeploy'
+
+- stage: PostDeployment
+  displayName: 'Post Deployment Tests'
+  dependsOn: Deploy
+  condition: succeeded()
+  jobs:
+  - job: IntegrationTests
+    displayName: 'Run Integration Tests'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    - checkout: self
+      displayName: 'Checkout for Tests'
+
+    - task: AzureCLI@2
+      displayName: 'Test Function Endpoints'
+      inputs:
+        azureSubscription: $(azureServiceConnection)
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Get function key
+          FUNCTION_KEY=$(az functionapp keys list \
+            --name $(functionAppName) \
+            --resource-group $(resourceGroupName) \
+            --query "functionKeys.default" -o tsv)
+          
+          # Test HTTP trigger
+          curl -X GET "https://$(functionAppName).azurewebsites.net/api/CostAnalysisHttpTrigger?code=$FUNCTION_KEY&dryRun=true" \
+            -H "Content-Type: application/json" \
+            --fail --show-error --silent
+          
+          echo "✅ Function endpoints are responding correctly"
+
+  - job: ConfigurationValidation
+    displayName: 'Validate Configuration'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    - task: AzureCLI@2
+      displayName: 'Validate Managed Identity Permissions'
+      inputs:
+        azureSubscription: $(azureServiceConnection)
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          # Validate that managed identity has required permissions
+          IDENTITY_ID=$(az functionapp identity show \
+            --name $(functionAppName) \
+            --resource-group $(resourceGroupName) \
+            --query "principalId" -o tsv)
+          
+          # Check Cost Management Reader role
+          az role assignment list \
+            --assignee $IDENTITY_ID \
+            --role "Cost Management Reader" \
+            --query "[?principalId=='$IDENTITY_ID']" -o table
+          
+          # Check Reader role
+          az role assignment list \
+            --assignee $IDENTITY_ID \
+            --role "Reader" \
+            --query "[?principalId=='$IDENTITY_ID']" -o table
+          
+          echo "✅ Managed Identity permissions validated"
+
+# Opcional: Stage para executar análise manual após deploy
+- stage: ManualAnalysis
+  displayName: 'Manual Cost Analysis'
+  dependsOn: PostDeployment
+  condition: and(succeeded(), eq(variables['Build.Reason'], 'Manual'))
+  jobs:
+  - job: TriggerAnalysis
+    displayName: 'Trigger Manual Analysis'
+    pool:
+      vmImage: 'ubuntu-latest'
+    
+    steps:
+    - task: AzureCLI@2
+      displayName: 'Trigger Cost Analysis'
+      inputs:
+        azureSubscription: $(azureServiceConnection)
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          FUNCTION_KEY=$(az functionapp keys list \
+            --name $(functionAppName) \
+            --resource-group $(resourceGroupName) \
+            --query "functionKeys.default" -o tsv)
+          
+          # Trigger analysis with dry run
+          curl -X POST "https://$(functionAppName).azurewebsites.net/api/CostAnalysisHttpTrigger?code=$FUNCTION_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{"analysisPeriodDays": 7, "dryRun": true}' \
+            --fail --show-error
+          
+          echo "✅ Manual cost analysis triggered successfully"

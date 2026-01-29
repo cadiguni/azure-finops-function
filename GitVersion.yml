@@ -1,0 +1,13 @@
+mode: Mainline
+branches:
+  feature:
+    regex: ^feature(s)?[/-]
+    increment: Minor
+  release:
+    regex: ^release(s)?[/-]
+    increment: Minor      
+ignore:
+  sha: []
+merge-message-formats: {}
+assembly-file-versioning-format: '{Major}.{Minor}.{Patch}.{env:BUILD_NUMBER ?? 0}'
+assembly-informational-format: '{Major}.{Minor}.{Patch}.{env:BUILD_NUMBER ?? 0}{PreReleaseTagWithDash}+{Sha}'
