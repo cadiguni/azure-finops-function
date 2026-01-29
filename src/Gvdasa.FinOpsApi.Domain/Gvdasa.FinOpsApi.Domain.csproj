@@ -3,6 +3,8 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AssemblyName>Gvdasa.FinOpsApi.Domain</AssemblyName>
+    <RootNamespace>Gvdasa.FinOpsApi.Domain</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="MediatR" Version="12.4.1" />
