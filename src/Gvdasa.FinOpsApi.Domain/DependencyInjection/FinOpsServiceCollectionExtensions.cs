@@ -2,7 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using Gvdasa.GVmodeloexemploapi.Domain.Analyzers;
 using Gvdasa.GVmodeloexemploapi.Domain.Configuration;
 using Gvdasa.GVmodeloexemploapi.Domain.Services;
-using Gvdasa.GVmodeloexemploapi.Infra.Services.FinOps;
+using Gvdasa.FinOpsApi.Infra.Services.FinOps;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 

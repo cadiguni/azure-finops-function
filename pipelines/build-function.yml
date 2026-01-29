@@ -24,10 +24,10 @@ stages:
           vstsFeed: 'Feed_NAP'
           includeNuGetOrg: true
           projects: |
-            src/Gvdasa.GVmodeloexemploapi.WebApi/Gvdasa.GVmodeloexemploapi.WebApi.csproj
-            src/Gvdasa.GVmodeloexemploapi.Domain/Gvdasa.GVmodeloexemploapi.Domain.csproj
-            src/Gvdasa.GVmodeloexemploapi.Infra/Gvdasa.GVmodeloexemploapi.Infra.csproj
-            src/Gvdasa.GVmodeloexemploapi.Modelos/Gvdasa.GVmodeloexemploapi.Modelos.csproj
+            src/Gvdasa.FinOpsApi.WebApi/Gvdasa.FinOpsApi.WebApi.csproj
+            src/Gvdasa.FinOpsApi.Domain/Gvdasa.FinOpsApi.Domain.csproj
+            src/Gvdasa.FinOpsApi.Infra/Gvdasa.FinOpsApi.Infra.csproj
+            src/Gvdasa.FinOpsApi.Modelos/Gvdasa.FinOpsApi.Modelos.csproj
 
       - task: DotNetCoreCLI@2
         displayName: Build
@@ -37,10 +37,10 @@ stages:
           vstsFeed: 'Feed_NAP'
           includeNuGetOrg: true
           projects: |
-            src/Gvdasa.GVmodeloexemploapi.WebApi/Gvdasa.GVmodeloexemploapi.WebApi.csproj
-            src/Gvdasa.GVmodeloexemploapi.Domain/Gvdasa.GVmodeloexemploapi.Domain.csproj
-            src/Gvdasa.GVmodeloexemploapi.Infra/Gvdasa.GVmodeloexemploapi.Infra.csproj
-            src/Gvdasa.GVmodeloexemploapi.Modelos/Gvdasa.GVmodeloexemploapi.Modelos.csproj
+            src/Gvdasa.FinOpsApi.WebApi/Gvdasa.FinOpsApi.WebApi.csproj
+            src/Gvdasa.FinOpsApi.Domain/Gvdasa.FinOpsApi.Domain.csproj
+            src/Gvdasa.FinOpsApi.Infra/Gvdasa.FinOpsApi.Infra.csproj
+            src/Gvdasa.FinOpsApi.Modelos/Gvdasa.FinOpsApi.Modelos.csproj
 
       - task: DotNetCoreCLI@2
         displayName: Publish
@@ -50,7 +50,7 @@ stages:
           feedsToUse: 'select'
           vstsFeed: 'Feed_NAP'
           includeNuGetOrg: true
-          projects: 'src/Gvdasa.GVmodeloexemploapi.WebApi/Gvdasa.GVmodeloexemploapi.WebApi.csproj'
+          projects: 'src/Gvdasa.FinOpsApi.WebApi/Gvdasa.FinOpsApi.WebApi.csproj'
           arguments: '--configuration Release --output $(build.artifactstagingdirectory)'
 
       - task: PublishBuildArtifacts@1

@@ -10,7 +10,7 @@ resources:
     - repository: DEVOPS
       type: git
       name: NAP/_git/DevOps
-      ref: 'refs/tags/v3.0.3'
+      ref: 'refs/tags/v4.0.4'
 
 variables:
   - template: config.yml

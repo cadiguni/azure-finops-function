@@ -1,11 +1,11 @@
-using Gvdasa.GVmodeloexemploapi.Domain.Services;
+using Gvdasa.FinOpsApi.Domain.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
 using System.Net;
 using System.Text.Json;
 
-namespace Gvdasa.GVmodeloexemploapi.WebApi.Functions;
+namespace Gvdasa.FinOpsApi.WebApi.Functions;
 
 public class CostAnalysisFunction
 {

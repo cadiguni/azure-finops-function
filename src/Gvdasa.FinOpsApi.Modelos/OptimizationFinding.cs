@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace Gvdasa.GVmodeloexemploapi.Modelos.FinOps;
+namespace Gvdasa.FinOpsApi.Modelos.FinOps;
 
 public class OptimizationFinding
 {

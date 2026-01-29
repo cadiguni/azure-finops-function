@@ -148,17 +148,6 @@ locals {
         resource_id = azurerm_linux_web_app.webapp_a.id
       }
     } : {}
-  
-    # Lista de alertas de SQL Server
-    sql_server_alerts = local.alerts_enabled && local.isdbsqlserver == "True" ? {
-      "high-dtu" = {
-        name = "high-dtu"
-        description = "Alerta de alto consumo de DTU"
-        severity = "3"
-        threshold = 80
-        resource_id = azurerm_mssql_database.db.id
-      }
-    } : {}
 
     # Lista de alertas de App Service Plan
     app_service_plan_queue_alerts = local.alerts_enabled ? {

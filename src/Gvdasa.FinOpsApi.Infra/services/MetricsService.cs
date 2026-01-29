@@ -1,6 +1,6 @@
-using Gvdasa.GVmodeloexemploapi.Modelos.FinOps;
+using Gvdasa.FinOpsApi.Modelos.FinOps;
 
-namespace Gvdasa.GVmodeloexemploapi.Infra.Services.FinOps;
+namespace Gvdasa.FinOpsApi.Infra.Services.FinOps;
 
 public interface IMetricsService
 {

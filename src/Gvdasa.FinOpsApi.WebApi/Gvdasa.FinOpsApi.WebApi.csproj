@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);1591</NoWarn>
-    <RootNamespace>Gvdasa.GVmodeloexemploapi.WebApi</RootNamespace>
+    <RootNamespace>Gvdasa.FinOpsApi.WebApi</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
    <PackageReference Include="Azure.Messaging.ServiceBus" Version="7.18.1" />
@@ -26,8 +26,8 @@
     <PackageReference Include="DateOnlyTimeOnly.AspNet.Swashbuckle" Version="2.1.1" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\Gvdasa.GVmodeloexemploapi.Domain\Gvdasa.GVmodeloexemploapi.Domain.csproj" />
-    <ProjectReference Include="..\Gvdasa.GVmodeloexemploapi.Infra\Gvdasa.GVmodeloexemploapi.Infra.csproj" />
-    <ProjectReference Include="..\Gvdasa.GVmodeloexemploapi.Modelos\Gvdasa.GVmodeloexemploapi.Modelos.csproj" />
+    <ProjectReference Include="..\Gvdasa.FinOpsApi.Domain\Gvdasa.FinOpsApi.Domain.csproj" />
+    <ProjectReference Include="..\Gvdasa.FinOpsApi.Infra\Gvdasa.FinOpsApi.Infra.csproj" />
+    <ProjectReference Include="..\Gvdasa.FinOpsApi.Modelos\Gvdasa.FinOpsApi.Modelos.csproj" />
   </ItemGroup>
 </Project>

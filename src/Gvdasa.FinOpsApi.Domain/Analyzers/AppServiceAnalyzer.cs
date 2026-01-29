@@ -1,4 +1,4 @@
-using Gvdasa.GVmodeloexemploapi.Modelos.FinOps;
+using Gvdasa.FinOpsApi.Modelos.FinOps;
 
 namespace Gvdasa.GVmodeloexemploapi.Domain.Analyzers;
 

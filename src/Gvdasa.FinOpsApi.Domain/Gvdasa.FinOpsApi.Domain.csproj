@@ -9,7 +9,7 @@
     <PackageReference Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\Gvdasa.GVmodeloexemploapi.Modelos\Gvdasa.GVmodeloexemploapi.Modelos.csproj" />
-    <ProjectReference Include="..\Gvdasa.GVmodeloexemploapi.Infra\Gvdasa.GVmodeloexemploapi.Infra.csproj" />
+    <ProjectReference Include="..\Gvdasa.FinOpsApi.Modelos\Gvdasa.FinOpsApi.Modelos.csproj" />
+    <ProjectReference Include="..\Gvdasa.FinOpsApi.Infra\Gvdasa.FinOpsApi.Infra.csproj" />
   </ItemGroup>
 </Project>

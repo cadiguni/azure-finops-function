@@ -1,7 +1,7 @@
 using Gvdasa.GVmodeloexemploapi.Domain.Analyzers;
 using Gvdasa.GVmodeloexemploapi.Domain.Configuration;
-using Gvdasa.GVmodeloexemploapi.Infra.Services.FinOps;
-using Gvdasa.GVmodeloexemploapi.Modelos.FinOps;
+using Gvdasa.FinOpsApi.Infra.Services.FinOps;
+using Gvdasa.FinOpsApi.Modelos.FinOps;
 using Microsoft.Extensions.Options;
 
 namespace Gvdasa.GVmodeloexemploapi.Domain.Services;
