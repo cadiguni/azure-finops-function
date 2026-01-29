@@ -33,8 +33,3 @@ stages:
       SetorContainerBackendTerraform: "servicosbase"
       tfVars: '-var "aplicacao=$(NomeAplicacao)" -var "ambiente=$(Ambiente)" -var webhookUrlTeams=$(webhookUrlTeams)'
       tipo: 'back-dot-net'
-      ApiId: "gvmodeloExemploBack" # substituir pelo nome EX. projeto-test
-      ApiDisplayName: "GVmodeloExemploBack" # exemplo "test-project"
-      sourcePipeline: "GVmodeloExemploBack-build" # EX. TestProject-back-deploy
-      packageForLinux: '**/*.zip'
-      tipo: 'back-dot-net'
