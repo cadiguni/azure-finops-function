@@ -21,11 +21,12 @@ public class CostAnalysisFunction
     [Function("CostAnalysisTimerTrigger")]
     public async Task RunScheduled([TimerTrigger("0 0 3 * * *")] TimerInfo timer)
     {
-        _logger.LogInformation("Iniciando análise de custo programada às {Time}", DateTime.Now);
+        _logger.LogInformation("Iniciando análise de custo diária às {Time}", DateTime.Now);
 
         try
         {
-            // Executar análise para todas as subscriptions
+            // Executar análise para todas as subscriptions (1x por dia é suficiente)
+            // Custos não mudam de hora em hora, economiza processamento
             var result = await _costAnalysisOrchestrator.AnalyzeAllSubscriptionsAsync(30);
             
             _logger.LogInformation("Análise concluída com sucesso. {FindingCount} achados, economia potencial: {TotalSaving:C}", 

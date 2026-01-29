@@ -53,6 +53,12 @@ resource "azurerm_linux_function_app" "finops" {
     "FinOps__StorageAccountName"         = azurerm_storage_account.finops_storage.name
     "FinOps__StorageContainerName"       = azurerm_storage_container.results.name
     
+    # Scope Configuration - Centralizar escopo para produção
+    "FinOps__Scope__Mode"                = "ManagementGroup"
+    "FinOps__Scope__ManagementGroupId"   = "mg-gvdasa"
+    "FinOps__Scope__IncludeSubscriptions" = "[]"
+    "FinOps__Scope__ExcludeSubscriptions" = "[]"
+    
     # Azure API Endpoints
     "FinOps__CostManagementApiUrl"       = "https://management.azure.com"
     "FinOps__ResourceGraphApiUrl"        = "https://management.azure.com/providers/Microsoft.ResourceGraph/resources"

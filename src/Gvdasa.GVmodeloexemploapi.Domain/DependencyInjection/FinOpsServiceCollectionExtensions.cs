@@ -15,6 +15,7 @@ public static class FinOpsServiceCollectionExtensions
     {
         // Registrar configurações
         collection.Configure<AnalyzerOptions>(configuration.GetSection(AnalyzerOptions.SectionName));
+        collection.Configure<ScopeOptions>(configuration.GetSection(ScopeOptions.SectionName));
         
         // Registrar serviços de infraestrutura
         collection.AddScoped<ICostManagementService, CostManagementService>();
@@ -26,6 +27,7 @@ public static class FinOpsServiceCollectionExtensions
         collection.AddScoped<IResourceAnalyzer, DiskAnalyzer>();
         collection.AddScoped<IResourceAnalyzer, AppServiceAnalyzer>();
         collection.AddScoped<IResourceAnalyzer, SqlAnalyzer>();
+        collection.AddScoped<IResourceAnalyzer, GovernanceTagsAnalyzer>(); // Tags obrigatórias de governança
         
         // Registrar orquestrador principal
         collection.AddScoped<ICostAnalysisOrchestrator, CostAnalysisOrchestrator>();
