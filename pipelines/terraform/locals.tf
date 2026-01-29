@@ -13,7 +13,6 @@ locals {
 
   # Configurações específicas do FinOps
   finops_settings = {
-    storage_account_name = "${replace(lower(local.aplicacao), "-", "")}${lower(local.ambiente)}st001"
     function_app_name = "${local.aplicacao}-${local.ambiente}-func"
     app_service_plan_name = "${local.aplicacao}-${local.ambiente}-plan"
     application_insights_name = "${local.aplicacao}-${local.ambiente}-ai"
@@ -34,8 +33,13 @@ locals {
       "FinOps__Analyzer__MinimumCostToAnalyze" = "50.0"
       "FinOps__Analyzer__LowCpuThreshold" = "5.0"
       "FinOps__Analyzer__DaysInactiveThreshold" = "7"
-      "FinOps__Analyzer__Scope__UseManagementGroupScope" = var.ambiente == "prod" ? "true" : "false"
-      "FinOps__Analyzer__Scope__ManagementGroupId" = var.ambiente == "prod" ? "mg-gvdasa-root" : ""
+      
+      # Classificação de ambiente e comportamento
+      "FinOps__EnvironmentClassification__ProductionManagementGroups" = jsonencode(["Setores"])
+      "FinOps__EnvironmentClassification__NonProductionManagementGroups" = jsonencode(["Visual Studio"])
+      "FinOps__Scope__RootManagementGroup" = var.root_management_group
+      "FinOps__Behavior__DryRunInProduction" = "true"
+      "FinOps__Behavior__AllowAutomationInProduction" = "false"
     }
   }
 

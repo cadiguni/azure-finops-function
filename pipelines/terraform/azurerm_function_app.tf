@@ -17,8 +17,8 @@ resource "azurerm_linux_function_app" "finops" {
   location                   = local.localizacao
   resource_group_name        = local.ambiente == "prod" ? data.azurerm_resource_group.rg[0].name : azurerm_resource_group.rg[0].name
   service_plan_id           = azurerm_service_plan.finops.id
-  storage_account_name       = azurerm_storage_account.finops_storage.name
-  storage_account_access_key = azurerm_storage_account.finops_storage.primary_access_key
+  storage_account_name       = azurerm_storage_account.storage.name
+  storage_account_access_key = azurerm_storage_account.storage.primary_access_key
 
   identity {
     type         = "UserAssigned"
@@ -45,13 +45,13 @@ resource "azurerm_linux_function_app" "finops" {
     "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.finops.connection_string
     
     # Storage Configuration
-    "AZURE_STORAGE_CONNECTION_STRING"    = azurerm_storage_account.finops_storage.primary_connection_string
+    "AZURE_STORAGE_CONNECTION_STRING"    = azurerm_storage_account.storage.primary_connection_string
     
     # FinOps Configuration
     "FinOps__SubscriptionId"             = data.azurerm_client_config.current.subscription_id
     "FinOps__TenantId"                   = data.azurerm_client_config.current.tenant_id
     "FinOps__StorageAccountName"         = azurerm_storage_account.finops_storage.name
-    "FinOps__StorageContainerName"       = azurerm_storage_container.results.name
+    "FinOps__StorageContainerName"       = "analysis-results"
     
     # Scope Configuration - Centralizar escopo para produção
     "FinOps__Scope__Mode"                = "ManagementGroup"

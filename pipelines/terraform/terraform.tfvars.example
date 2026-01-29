@@ -1,0 +1,9 @@
+# Configuração do Management Group raiz
+root_management_group = "Geral"
+
+# Configurações do ambiente
+aplicacao = "finops-platform"
+ambiente = "dev"  # dev, hml, prod
+
+# URL do Webhook do Teams (opcional)
+webhookUrlTeams = ""

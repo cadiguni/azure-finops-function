@@ -1,3 +1,8 @@
+# Data source para o Management Group raiz
+data "azurerm_management_group" "root" {
+  name = var.root_management_group
+}
+
 # Managed Identity para a Function App
 resource "azurerm_user_assigned_identity" "finops_identity" {
   name                = local.finops_settings.managed_identity_name
@@ -7,41 +12,19 @@ resource "azurerm_user_assigned_identity" "finops_identity" {
   tags = local.tags
 }
 
-# Data source para obter o Management Group (se existir)
-data "azurerm_management_group" "root" {
-  count = local.ambiente == "prod" ? 1 : 0
-  name  = "mg-gvdasa-root"
-}
-
-# Role assignment para Cost Management Reader no Management Group (produção)
-resource "azurerm_role_assignment" "cost_management_reader_mg" {
-  count                = local.ambiente == "prod" ? 1 : 0
-  scope                = data.azurerm_management_group.root[0].id
-  role_definition_name = "Cost Management Reader"
-  principal_id         = azurerm_user_assigned_identity.finops_identity.principal_id
-}
-
-# Role assignment para Reader no Management Group (produção)
-resource "azurerm_role_assignment" "reader_mg" {
-  count                = local.ambiente == "prod" ? 1 : 0
-  scope                = data.azurerm_management_group.root[0].id
+# Role assignment para Reader no Management Group raiz
+# Isso automaticamente cobre: Setores, VisualStudio, Todos os MPNs, Todas as subscriptions
+resource "azurerm_role_assignment" "root_reader" {
+  scope                = data.azurerm_management_group.root.id
   role_definition_name = "Reader"
   principal_id         = azurerm_user_assigned_identity.finops_identity.principal_id
 }
 
-# Role assignment para Cost Management Reader na subscription (dev/hml)
-resource "azurerm_role_assignment" "cost_management_reader_sub" {
-  count                = local.ambiente != "prod" ? 1 : 0
-  scope                = "/subscriptions/${data.azurerm_client_config.current.subscription_id}"
+# Role assignment para Cost Management Reader no Management Group raiz  
+# Permite leitura de custos em toda a hierarquia
+resource "azurerm_role_assignment" "root_cost_reader" {
+  scope                = data.azurerm_management_group.root.id
   role_definition_name = "Cost Management Reader"
-  principal_id         = azurerm_user_assigned_identity.finops_identity.principal_id
-}
-
-# Role assignment para Reader na subscription (dev/hml)
-resource "azurerm_role_assignment" "reader_sub" {
-  count                = local.ambiente != "prod" ? 1 : 0
-  scope                = "/subscriptions/${data.azurerm_client_config.current.subscription_id}"
-  role_definition_name = "Reader"
   principal_id         = azurerm_user_assigned_identity.finops_identity.principal_id
 }
 

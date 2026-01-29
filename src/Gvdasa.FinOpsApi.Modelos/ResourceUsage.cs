@@ -10,7 +10,14 @@ public class ResourceUsage
     public string ResourceId { get; set; } = string.Empty;
     public string ResourceName { get; set; } = string.Empty;
     public string ResourceType { get; set; } = string.Empty;
+    public string SubscriptionId { get; set; } = string.Empty;
+    public string ResourceGroup { get; set; } = string.Empty;
+    public string Location { get; set; } = string.Empty;
+    public string? ManagementGroupName { get; set; } // Para classificação de ambiente
     public DateTime MeasurementDate { get; set; }
+    
+    // Tags para governança e classificação
+    public Dictionary<string, string>? Tags { get; set; }
     
     // Métricas básicas
     public double CpuPercentage { get; set; }

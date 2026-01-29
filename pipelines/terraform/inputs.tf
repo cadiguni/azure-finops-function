@@ -10,3 +10,9 @@ variable "webhookUrlTeams" {
   description = "URL do Webhook do Teams. Pode ser nulo ou vazio."
   default     = null
 }
+
+variable "root_management_group" {
+  description = "Management Group raiz onde estão todas as subscriptions"
+  type        = string
+  default     = "Geral"
+}

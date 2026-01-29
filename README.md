@@ -22,8 +22,64 @@ A plataforma FinOps analisa automaticamente recursos Azure para identificar opor
 | **App Service Analyzer** | Apps com baixo tráfego | Downgrade de planos |
 | **SQL Analyzer** | Databases com baixo DTU | Otimização de tier |
 | **Governance Tags** | Tags obrigatórias ausentes | Compliance e rastreabilidade |
+| **Environment Classification** | Classificação automática Prod/Dev | Comportamento diferenciado por ambiente |
 
 ## ⚙️ Configuração
+
+### 🔒 Segurança e Permissões
+
+**Centralização de Permissões no Management Group:**
+```terraform
+# Permissões aplicadas no Management Group raiz "Geral"
+# Automaticamente cobre: Setores, VisualStudio, Todos os MPNs, Todas as subscriptions
+resource "azurerm_role_assignment" "root_reader" {
+  scope                = data.azurerm_management_group.root.id
+  role_definition_name = "Reader"
+  principal_id         = azurerm_user_assigned_identity.finops_identity.principal_id
+}
+```
+
+**Benefícios da Arquitetura:**
+- ✅ **Uma única permissão** no Terraform
+- ✅ **Escopo correto** para toda a hierarquia
+- ✅ **Zero manutenção futura** se criar novo MG
+- ✅ **Não quebra** com hierarquia profunda
+- ✅ **Código controla comportamento** por ambiente
+
+### 🎯 Classificação de Ambiente
+
+**Automática por Management Group:**
+```json
+{
+  "EnvironmentClassification": {
+    "ProductionManagementGroups": ["Setores"],
+    "NonProductionManagementGroups": ["VisualStudio"]
+  }
+}
+```
+
+**Prioridade por Tag (recomendado):**
+- 🏷️ `environment=prod` → **Produção**
+- 🏷️ `environment=dev|hml` → **MPN/Desenvolvimento**
+
+💡 **Tag ganha de Management Group quando existir**
+
+### 🛡️ Comportamento por Ambiente
+
+| Ambiente | Análise | Ação | Segurança |
+|----------|---------|------|-----------|
+| **MPN/Dev** | Completa | Pode sugerir + automatizar | Flexível |
+| **Produção** | Limitada | **Só leitura + relatório** | Máxima |
+
+```csharp
+// Código automaticamente ajusta comportamento
+if (isProd)
+{
+    options.DryRun = true;           // ✅ Apenas análise
+    options.AllowAutomation = false; // ✅ Sem automação  
+    options.ReadOnly = true;         // ✅ Só leitura
+}
+```
 
 ### 🎛️ Frequência de Execução
 
