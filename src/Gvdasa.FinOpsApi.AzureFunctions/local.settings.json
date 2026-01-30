@@ -4,10 +4,17 @@
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
     "ambiente": "local",
+    
+    "_comment_nivel3": "=== NÍVEL 3 - Configurações Azure APIs reais ===",
+    "AZURE_SUBSCRIPTION_ID": "sua-subscription-id-aqui",
     "AZURE_TENANT_ID": "your-tenant-id",
     "AZURE_CLIENT_ID": "your-client-id",
     "AZURE_CLIENT_SECRET": "your-client-secret",
     "MANAGEMENT_GROUP_ID": "Geral",
+    
+    "_comment_auth": "Para autenticação local, use: az login OU configure as variáveis acima",
+    "_comment_testing": "Para testar sem credenciais reais, remova AZURE_SUBSCRIPTION_ID para usar fallback",
+    
     "ApplicationInsightsAgent_EXTENSION_VERSION": "~3"
   },
   "Host": {
