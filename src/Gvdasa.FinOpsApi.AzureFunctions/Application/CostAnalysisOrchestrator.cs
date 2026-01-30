@@ -6,10 +6,12 @@ namespace Gvdasa.FinOpsApi.AzureFunctions.Application;
 public class CostAnalysisOrchestrator
 {
     private readonly UnattachedDiskAnalyzer _diskAnalyzer;
+    private readonly StorageAccountAnalyzer _storageAnalyzer;
 
-    public CostAnalysisOrchestrator(UnattachedDiskAnalyzer diskAnalyzer)
+    public CostAnalysisOrchestrator(UnattachedDiskAnalyzer diskAnalyzer, StorageAccountAnalyzer storageAnalyzer)
     {
         _diskAnalyzer = diskAnalyzer;
+        _storageAnalyzer = storageAnalyzer;
     }
 
     /// <summary>
@@ -17,6 +19,17 @@ public class CostAnalysisOrchestrator
     /// </summary>
     public async Task<CostAnalysisResult> ExecuteAnalysisAsync(CostAnalysisRequest request)
     {
+        // 🐛 DEBUG: Log completo da requisição
+        Console.WriteLine($"🐛 ExecuteAnalysisAsync - Request recebido:");
+        Console.WriteLine($"🐛   Request: {(request == null ? "NULL" : "NOT NULL")}");
+        if (request != null)
+        {
+            Console.WriteLine($"🐛   Scope: '{request.Scope ?? "NULL"}'");
+            Console.WriteLine($"🐛   SubscriptionId: '{request.SubscriptionId ?? "NULL"}'");
+            Console.WriteLine($"🐛   DryRun: {request.DryRun}");
+            Console.WriteLine($"🐛   AnalysisOptions: {(request.AnalysisOptions == null ? "NULL" : "NOT NULL")}");
+        }
+
         var result = new CostAnalysisResult
         {
             Scope = request.Scope,
@@ -33,17 +46,30 @@ public class CostAnalysisOrchestrator
             // Validar request
             ValidateRequest(request);
 
-            // Executar análises baseadas na configuração IncludeOptions
-            if (request.IncludeOptions.UnattachedDisks)
+            // 🚀 NÍVEL 4: Múltiplos analyzers executando em paralelo
+            var tasks = new List<Task<List<CostRecommendation>>>();
+            
+            if (request.AnalysisOptions.UnattachedDisks)
             {
-                var diskRecommendations = await AnalyzeUnattachedDisksAsync(request);
-                allRecommendations.AddRange(diskRecommendations);
+                tasks.Add(AnalyzeUnattachedDisksAsync(request));
+            }
+            
+            if (request.AnalysisOptions.StorageAccounts)
+            {
+                tasks.Add(AnalyzeStorageAccountsAsync(request));
+            }
+            
+            // Executar todas as análises em paralelo
+            var results = await Task.WhenAll(tasks);
+            foreach (var recommendations in results)
+            {
+                allRecommendations.AddRange(recommendations);
             }
 
             // Futuras análises virão aqui:
-            // if (request.IncludeOptions.Vms) { ... }
-            // if (request.IncludeOptions.AppServices) { ... }
-            // if (request.IncludeOptions.SqlDatabases) { ... }
+            // if (request.AnalysisOptions.Vms) { ... }
+            // if (request.AnalysisOptions.AppServices) { ... }
+            // if (request.AnalysisOptions.SqlDatabases) { ... }
 
             result.Recommendations = allRecommendations;
             result.Summary = BuildSummary(allRecommendations);
@@ -92,6 +118,19 @@ public class CostAnalysisOrchestrator
     /// </summary>
     private void ValidateRequest(CostAnalysisRequest request)
     {
+        if (request == null)
+        {
+            throw new ArgumentNullException(nameof(request), "Request não pode ser null");
+        }
+
+        if (string.IsNullOrEmpty(request.Scope))
+        {
+            throw new ArgumentException("Scope não pode ser null ou vazio");
+        }
+
+        // 🔥 BLINDAGEM FINAL: AnalysisOptions nunca null
+        request.AnalysisOptions ??= new AnalysisIncludeOptions();
+
         if (request.Scope.Equals("subscription", StringComparison.OrdinalIgnoreCase) && 
             string.IsNullOrEmpty(request.SubscriptionId))
         {
@@ -134,5 +173,29 @@ public class CostAnalysisOrchestrator
         }
 
         return summary;
+    }
+    
+    /// <summary>
+    /// 🏪 NÍVEL 4: Análise de Storage Accounts subutilizados
+    /// </summary>
+    private async Task<List<CostRecommendation>> AnalyzeStorageAccountsAsync(CostAnalysisRequest request)
+    {
+        try
+        {
+            Console.WriteLine("🏪 Iniciando análise de Storage Accounts...");
+            
+            if (request.Scope == "subscription" && !string.IsNullOrEmpty(request.SubscriptionId))
+            {
+                return await _storageAnalyzer.AnalyzeSubscriptionAsync(request.SubscriptionId);
+            }
+
+            Console.WriteLine("⚠️ Storage: Escopo não suportado ou SubscriptionId não fornecido");
+            return new List<CostRecommendation>();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Erro na análise de Storage Accounts: {ex.Message}");
+            return new List<CostRecommendation>();
+        }
     }
 }
