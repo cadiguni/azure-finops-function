@@ -2,6 +2,7 @@ using System.Net;
 using System.Text.Json;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
+using Microsoft.Extensions.Logging;
 using Gvdasa.FinOpsApi.AzureFunctions.Application;
 using Gvdasa.FinOpsApi.AzureFunctions.Analyzers;
 using Gvdasa.FinOpsApi.AzureFunctions.Models;
@@ -11,9 +12,11 @@ namespace Gvdasa.FinOpsApi.AzureFunctions;
 public class CostAnalysisFunctions
 {
     private readonly HttpClient _httpClient;
+    private readonly ILogger<CostAnalysisFunctions> _logger;
 
-    public CostAnalysisFunctions()
+    public CostAnalysisFunctions(ILogger<CostAnalysisFunctions> logger)
     {
+        _logger = logger;
         _httpClient = new HttpClient();
     }
 
@@ -38,20 +41,42 @@ public class CostAnalysisFunctions
             if (req.Method.Equals("POST", StringComparison.OrdinalIgnoreCase))
             {
                 var requestBody = await new StreamReader(req.Body).ReadToEndAsync();
-                request = JsonSerializer.Deserialize<CostAnalysisRequest>(requestBody, new JsonSerializerOptions
+                _logger.LogInformation($"Request body received: {requestBody}");
+                
+                if (string.IsNullOrWhiteSpace(requestBody))
                 {
-                    PropertyNameCaseInsensitive = true
-                }) ?? new CostAnalysisRequest();
+                    request = new CostAnalysisRequest();
+                }
+                else
+                {
+                    try
+                    {
+                        request = JsonSerializer.Deserialize<CostAnalysisRequest>(requestBody, new JsonSerializerOptions
+                        {
+                            PropertyNameCaseInsensitive = true,
+                            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                        }) ?? new CostAnalysisRequest();
+                        
+                        _logger.LogInformation($"Parsed request - SubscriptionId: {request.SubscriptionId}, Scope: {request.Scope}");
+                    }
+                    catch (JsonException ex)
+                    {
+                        _logger.LogError($"JSON deserialization error: {ex.Message}");
+                        request = new CostAnalysisRequest();
+                    }
+                }
             }
             else
             {
                 // GET request - usar query parameters ou default
-                var subscriptionId = req.Query["subscriptionId"];
+                var subscriptionId = req.Query["subscriptionId"].ToString();
+                _logger.LogInformation($"GET request - subscriptionId from query: {subscriptionId}");
+                
                 request = new CostAnalysisRequest
                 {
                     Scope = "subscription",
-                    SubscriptionId = subscriptionId,
-                    Include = new AnalysisIncludeOptions { UnattachedDisks = true }
+                    SubscriptionId = string.IsNullOrEmpty(subscriptionId) ? null : subscriptionId,
+                    IncludeOptions = new AnalysisIncludeOptions { UnattachedDisks = true }
                 };
             }
 
@@ -110,7 +135,7 @@ public class CostAnalysisFunctions
             {
                 Scope = "subscription",
                 SubscriptionId = req.Query["subscriptionId"],
-                Include = new AnalysisIncludeOptions { UnattachedDisks = true }
+                IncludeOptions = new AnalysisIncludeOptions { UnattachedDisks = true }
             };
 
             // Criar dependências

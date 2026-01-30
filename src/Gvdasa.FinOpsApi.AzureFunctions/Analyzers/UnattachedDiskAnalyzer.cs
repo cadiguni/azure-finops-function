@@ -24,12 +24,12 @@ public class UnattachedDiskAnalyzer
 
         try
         {
-            // Query KQL para buscar discos não anexados
-            var kqlQuery = @"
+            // Query KQL otimizada para buscar discos não anexados
+            var kqlQuery = $@"
                 Resources
                 | where type =~ 'microsoft.compute/disks'
                 | where subscriptionId =~ '{subscriptionId}'
-                | where isnull(properties.managedBy)
+                | where isnull(properties.managedBy) or properties.managedBy == """"
                 | where properties.diskState =~ 'Unattached'
                 | project 
                     resourceId = id,
@@ -42,7 +42,7 @@ public class UnattachedDiskAnalyzer
                     diskState = properties.diskState,
                     timeCreated = properties.timeCreated,
                     tags
-            ".Replace("{subscriptionId}", subscriptionId);
+            ";
 
             var disks = await ExecuteResourceGraphQueryAsync(kqlQuery);
 
@@ -71,9 +71,13 @@ public class UnattachedDiskAnalyzer
     {
         try
         {
+            Console.WriteLine("🔐 Iniciando autenticação Azure...");
+            
             // Obter token de acesso
             var tokenRequestContext = new Azure.Core.TokenRequestContext(new[] { "https://management.azure.com/.default" });
             var tokenResponse = await _credential.GetTokenAsync(tokenRequestContext);
+            
+            Console.WriteLine("✅ Token obtido com sucesso");
 
             // Preparar requisição para o Resource Graph API
             var requestBody = new
@@ -83,6 +87,7 @@ public class UnattachedDiskAnalyzer
             };
 
             var json = JsonSerializer.Serialize(requestBody);
+            Console.WriteLine($"📤 Executando query KQL: {query}");
             var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
 
             // Configurar headers
@@ -95,22 +100,30 @@ public class UnattachedDiskAnalyzer
             if (response.IsSuccessStatusCode)
             {
                 var responseContent = await response.Content.ReadAsStringAsync();
+                Console.WriteLine($"📥 Resource Graph resposta: {responseContent}");
                 var result = JsonSerializer.Deserialize<JsonElement>(responseContent);
 
                 if (result.TryGetProperty("data", out var dataElement))
                 {
-                    return dataElement.EnumerateArray().ToList();
+                    var dataList = dataElement.EnumerateArray().ToList();
+                    Console.WriteLine($"📊 Encontrados {dataList.Count} recursos na query");
+                    return dataList;
                 }
             }
             else
             {
                 var errorContent = await response.Content.ReadAsStringAsync();
-                Console.WriteLine($"Erro na query Resource Graph: {response.StatusCode} - {errorContent}");
+                Console.WriteLine($"❌ Erro na query Resource Graph: {response.StatusCode} - {errorContent}");
             }
+        }
+        catch (Azure.Identity.AuthenticationFailedException authEx)
+        {
+            Console.WriteLine($"❌ Falha de autenticação Azure: {authEx.Message}");
+            Console.WriteLine($"❌ Detalhes: {authEx}");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Erro ao executar query Resource Graph: {ex.Message}");
+            Console.WriteLine($"❌ Erro ao executar query Resource Graph: {ex.Message}");
         }
 
         return new List<JsonElement>();

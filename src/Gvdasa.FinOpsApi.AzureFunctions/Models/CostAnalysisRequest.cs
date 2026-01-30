@@ -34,7 +34,7 @@ public class CostAnalysisRequest
     /// <summary>
     /// Configuração do que incluir na análise
     /// </summary>
-    public AnalysisIncludeOptions Include { get; set; } = new();
+    public AnalysisIncludeOptions IncludeOptions { get; set; } = new();
 }
 
 public class AnalysisIncludeOptions

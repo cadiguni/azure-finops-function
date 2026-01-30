@@ -33,17 +33,17 @@ public class CostAnalysisOrchestrator
             // Validar request
             ValidateRequest(request);
 
-            // Executar análises baseadas na configuração Include
-            if (request.Include.UnattachedDisks)
+            // Executar análises baseadas na configuração IncludeOptions
+            if (request.IncludeOptions.UnattachedDisks)
             {
                 var diskRecommendations = await AnalyzeUnattachedDisksAsync(request);
                 allRecommendations.AddRange(diskRecommendations);
             }
 
             // Futuras análises virão aqui:
-            // if (request.Include.Vms) { ... }
-            // if (request.Include.AppServices) { ... }
-            // if (request.Include.SqlDatabases) { ... }
+            // if (request.IncludeOptions.Vms) { ... }
+            // if (request.IncludeOptions.AppServices) { ... }
+            // if (request.IncludeOptions.SqlDatabases) { ... }
 
             result.Recommendations = allRecommendations;
             result.Summary = BuildSummary(allRecommendations);
