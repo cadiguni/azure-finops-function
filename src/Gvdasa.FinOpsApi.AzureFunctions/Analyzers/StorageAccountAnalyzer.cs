@@ -48,7 +48,7 @@ public class StorageAccountAnalyzer
 
             foreach (var storage in storageAccounts)
             {
-                var recommendation = CreateStorageRecommendationAsync(storage);
+                var recommendation = CreateStorageRecommendationAsync(storage, subscriptionId);
                 if (recommendation != null)
                 {
                     recommendations.Add(recommendation);
@@ -122,7 +122,7 @@ public class StorageAccountAnalyzer
         return new List<JsonElement>();
     }
 
-    private CostRecommendation? CreateStorageRecommendationAsync(JsonElement storage)
+    private CostRecommendation? CreateStorageRecommendationAsync(JsonElement storage, string subscriptionId)
     {
         try
         {
@@ -148,7 +148,7 @@ public class StorageAccountAnalyzer
                 ResourceName = name ?? "",
                 ResourceType = "Microsoft.Storage/storageAccounts",
                 ResourceGroup = resourceGroup ?? "",
-                SubscriptionId = "",
+                SubscriptionId = subscriptionId,
                 EstimatedMonthlySavings = estimatedMonthlyCost * 0.7m, // 70% de economia potencial
                 Description = $"Storage Account '{name}' pode estar subutilizado. Considere revisar métricas de uso. Revisar utilização ou migrar para tier mais econômico.",
                 Priority = "Medium",
