@@ -56,23 +56,26 @@ public class FinOpsResultAggregator
         {
             _logger.LogInformation("💾 Processando resultado FinOps: {analysisId}", result.AnalysisId);
 
-            // Organizar por data: 2026/02/02/analysis-subscription.json
-            var datePath = result.ExecutedAt.ToString("yyyy/MM/dd");
-            var fileName = $"analysis-{result.SubscriptionId}-{result.AnalysisId:N}.json";
-            var blobPath = $"{datePath}/{fileName}";
+            // 🧩 Estrutura de particionamento otimizada para produção
+            // year=2026/month=02/day=02/subscription=abc.../analysisId=xyz.json
+            var blobName = $"year={result.ExecutedAt:yyyy}/" +
+                          $"month={result.ExecutedAt:MM}/" +
+                          $"day={result.ExecutedAt:dd}/" +
+                          $"subscription={result.SubscriptionId}/" +
+                          $"analysisId={result.AnalysisId:N}.json";
 
             // Se storage não disponível, só loga o que salvaria
             if (_containerClient == null)
             {
-                _logger.LogWarning("⚠️ Storage indisponível - SALVARIA: {blobPath} ({recs} recomendações, R$ {savings}/mês)", 
-                    blobPath, result.Recommendations.Count, result.Summary.TotalEstimatedMonthlySavings);
+                _logger.LogWarning("⚠️ Storage indisponível - SALVARIA: {blobName} ({recs} recomendações, R$ {savings}/mês)", 
+                    blobName, result.Recommendations.Count, result.Summary.TotalEstimatedMonthlySavings);
                 return;
             }
 
             // Garantir que container existe
             await _containerClient.CreateIfNotExistsAsync();
             
-            var blobClient = _containerClient.GetBlobClient(blobPath);
+            var blobClient = _containerClient.GetBlobClient(blobName);
 
             // Serializar com encoding correto
             var jsonContent = JsonSerializer.Serialize(result, _jsonOptions);
@@ -82,8 +85,8 @@ public class FinOpsResultAggregator
             
             await blobClient.UploadAsync(stream, overwrite: true);
 
-            _logger.LogInformation("✅ Resultado salvo: {blobPath} ({size} bytes)", 
-                blobPath, jsonBytes.Length);
+            _logger.LogInformation("✅ Resultado salvo: {blobName} ({size} bytes)", 
+                blobName, jsonBytes.Length);
         }
         catch (Exception ex)
         {
