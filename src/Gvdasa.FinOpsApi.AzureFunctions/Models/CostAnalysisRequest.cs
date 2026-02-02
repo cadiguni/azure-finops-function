@@ -60,6 +60,11 @@ public class AnalysisIncludeOptions
     public bool UnusedPublicIps { get; set; } = true;
     
     /// <summary>
+    /// Analisar VMs ligadas mas ociosas (maior impacto FinOps)
+    /// </summary>
+    public bool IdleVms { get; set; } = true;
+    
+    /// <summary>
     /// Analisar App Services subutilizados
     /// </summary>
     public bool AppServices { get; set; } = false;

@@ -12,6 +12,7 @@ var host = new HostBuilder()
         services.AddScoped<UnattachedDiskAnalyzer>();
         services.AddScoped<StorageAccountAnalyzer>();
         services.AddScoped<UnusedPublicIpAnalyzer>();
+        services.AddScoped<IdleVmAnalyzer>();
         services.AddScoped<CostAnalysisOrchestrator>();
         
         Console.WriteLine("✅ NÍVEL 4: Services registrados - UnattachedDiskAnalyzer, StorageAccountAnalyzer, UnusedPublicIpAnalyzer, CostAnalysisOrchestrator");

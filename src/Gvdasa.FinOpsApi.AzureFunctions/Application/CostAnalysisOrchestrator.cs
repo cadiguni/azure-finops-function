@@ -8,15 +8,18 @@ public class CostAnalysisOrchestrator
     private readonly UnattachedDiskAnalyzer _diskAnalyzer;
     private readonly StorageAccountAnalyzer _storageAnalyzer;
     private readonly UnusedPublicIpAnalyzer _publicIpAnalyzer;
+    private readonly IdleVmAnalyzer _idleVmAnalyzer;
 
     public CostAnalysisOrchestrator(
         UnattachedDiskAnalyzer diskAnalyzer, 
         StorageAccountAnalyzer storageAnalyzer,
-        UnusedPublicIpAnalyzer publicIpAnalyzer)
+        UnusedPublicIpAnalyzer publicIpAnalyzer,
+        IdleVmAnalyzer idleVmAnalyzer)
     {
         _diskAnalyzer = diskAnalyzer;
         _storageAnalyzer = storageAnalyzer;
         _publicIpAnalyzer = publicIpAnalyzer;
+        _idleVmAnalyzer = idleVmAnalyzer;
     }
 
     /// <summary>
@@ -67,6 +70,12 @@ public class CostAnalysisOrchestrator
             if (request.AnalysisOptions.UnusedPublicIps)
             {
                 tasks.Add(AnalyzeUnusedPublicIpsAsync(request));
+            }
+
+            // 🖥️ VMs Idle - Maior impacto FinOps
+            if (request.AnalysisOptions.IdleVms)
+            {
+                tasks.Add(AnalyzeIdleVmsAsync(request));
             }
             
             // Executar todas as análises em paralelo
@@ -229,6 +238,30 @@ public class CostAnalysisOrchestrator
         catch (Exception ex)
         {
             Console.WriteLine($"❌ Erro na análise de Public IPs: {ex.Message}");
+            return new List<CostRecommendation>();
+        }
+    }
+
+    /// <summary>
+    /// Análise específica de VMs ociosas (maior impacto FinOps)
+    /// </summary>
+    private async Task<List<CostRecommendation>> AnalyzeIdleVmsAsync(CostAnalysisRequest request)
+    {
+        try
+        {
+            Console.WriteLine("🖥️ Iniciando análise de VMs ociosas - maior impacto FinOps...");
+            
+            if (request.Scope == "subscription" && !string.IsNullOrEmpty(request.SubscriptionId))
+            {
+                return await _idleVmAnalyzer.AnalyzeAsync(request.SubscriptionId);
+            }
+
+            Console.WriteLine("⚠️ VMs Idle: Escopo não suportado ou SubscriptionId não fornecido");
+            return new List<CostRecommendation>();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Erro na análise de VMs ociosas: {ex.Message}");
             return new List<CostRecommendation>();
         }
     }
