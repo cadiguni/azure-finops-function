@@ -1,0 +1,112 @@
+using Gvdasa.FinOpsApi.AzureFunctions.Services;
+using Microsoft.Azure.Functions.Worker;
+using Microsoft.Azure.Functions.Worker.Http;
+using Microsoft.Extensions.Logging;
+
+namespace Gvdasa.FinOpsApi.AzureFunctions.Functions;
+
+/// <summary>
+/// Function que roda diariamente para consolidar análises de custo
+/// Gera summary com rankings, totais e agregações
+/// </summary>
+public class DailySummaryFunction
+{
+    private readonly DailySummaryService _summaryService;
+    private readonly ILogger<DailySummaryFunction> _logger;
+
+    public DailySummaryFunction(
+        DailySummaryService summaryService,
+        ILogger<DailySummaryFunction> logger)
+    {
+        _summaryService = summaryService;
+        _logger = logger;
+    }
+
+    /// <summary>
+    /// Executa agregação diária às 01:00 UTC
+    /// Para teste local: "0 */5 * * * *" (a cada 5 min)
+    /// Para produção: "0 0 1 * * *" (01:00 diariamente)
+    /// </summary>
+    [Function("DailySummary")]
+    public async Task RunAsync(
+        [TimerTrigger("0 */5 * * * *")] TimerInfo timer,
+        FunctionContext context)
+    {
+        _logger.LogInformation("🕐 DailySummaryFunction iniciada em: {time}", DateTime.UtcNow);
+        
+        try
+        {
+            // Processar dados do dia atual
+            var targetDate = DateTime.UtcNow.ToString("yyyy-MM-dd");
+            
+            _logger.LogInformation("📅 Processando dados do dia: {date}", targetDate);
+            
+            var summary = await _summaryService.ProcessDayAsync(targetDate);
+            
+            _logger.LogInformation("✅ Summary concluído: {resources} recursos, R$ {savings} economia potencial", 
+                summary.TotalResourcesAnalyzed, 
+                summary.TotalPotentialSavings);
+
+            // Log dos principais insights
+            if (summary.Top10.Any())
+            {
+                var topSaving = summary.Top10.First();
+                _logger.LogInformation("🏆 Maior economia: {name} ({type}) - R$ {amount}", 
+                    topSaving.ResourceName, 
+                    topSaving.ResourceType, 
+                    topSaving.PotentialSavings);
+            }
+
+            if (summary.SummaryByType.Any())
+            {
+                var topType = summary.SummaryByType.OrderByDescending(kvp => kvp.Value.PotentialSavings).First();
+                _logger.LogInformation("📊 Tipo com maior impacto: {type} - {count} recursos, R$ {amount}", 
+                    topType.Key, 
+                    topType.Value.Count, 
+                    topType.Value.PotentialSavings);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ Erro na execução do DailySummary");
+            throw; // Deixa Functions runtime saber que falhou
+        }
+        
+        _logger.LogInformation("🎯 DailySummaryFunction concluída");
+    }
+
+    /// <summary>
+    /// Função manual para testar agregação de uma data específica
+    /// Para debug e testes
+    /// </summary>
+    [Function("ManualDailySummary")]
+    public async Task<object> RunManualAsync(
+        [HttpTrigger("get", "post")] HttpRequestData req,
+        FunctionContext context)
+    {
+        _logger.LogInformation("🔧 ManualDailySummary executada via HTTP");
+
+        try
+        {
+            // Pegar data da query string ou usar hoje
+            var dateStr = req.Query["date"] ?? DateTime.UtcNow.ToString("yyyy-MM-dd");
+            
+            _logger.LogInformation("📅 Processando data: {date} (manual)", dateStr);
+            
+            var summary = await _summaryService.ProcessDayAsync(dateStr);
+            
+            var response = req.CreateResponse(System.Net.HttpStatusCode.OK);
+            await response.WriteAsJsonAsync(summary);
+            
+            return response;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ Erro na execução manual");
+            
+            var errorResponse = req.CreateResponse(System.Net.HttpStatusCode.InternalServerError);
+            await errorResponse.WriteStringAsync($"Erro: {ex.Message}");
+            return errorResponse;
+        }
+    }
+}

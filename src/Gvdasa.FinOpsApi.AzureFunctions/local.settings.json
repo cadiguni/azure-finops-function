@@ -3,15 +3,7 @@
   "Values": {
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
-    "ambiente": "local",
-    "RESULTS_CONTAINER_NAME": "cost-analysis",
-    
-    "_comment_nivel3": "=== NÍVEL 3 - Configurações Azure APIs reais ===",
-    "_comment_auth": "Usando Azure CLI autenticado com 'az login'",
-    "_comment_testing": "Para produção, configure: AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET",
-    "MANAGEMENT_GROUP_ID": "Geral",
-    
-    "ApplicationInsightsAgent_EXTENSION_VERSION": "~3"
+    "RESULTS_CONTAINER_NAME": "finops-analysis"
   },
   "Host": {
     "LocalHttpPort": 7071,

@@ -8,19 +8,25 @@ using Gvdasa.FinOpsApi.AzureFunctions.Analyzers;
 using Gvdasa.FinOpsApi.AzureFunctions.Models;
 using Gvdasa.FinOpsApi.AzureFunctions.Services;
 
-namespace Gvdasa.FinOpsApi.AzureFunctions;
+namespace Gvdasa.FinOpsApi.AzureFunctions.Functions;
 
 public class CostAnalysisFunctions
 {
     private readonly CostAnalysisOrchestrator _orchestrator;
     private readonly FinOpsResultAggregator _resultAggregator;
+    private readonly AnalysisStorageService _storageService;
     private readonly ILogger<CostAnalysisFunctions> _logger;
 
-    public CostAnalysisFunctions(ILogger<CostAnalysisFunctions> logger, CostAnalysisOrchestrator orchestrator, FinOpsResultAggregator resultAggregator)
+    public CostAnalysisFunctions(
+        ILogger<CostAnalysisFunctions> logger, 
+        CostAnalysisOrchestrator orchestrator, 
+        FinOpsResultAggregator resultAggregator,
+        AnalysisStorageService storageService)
     {
         _logger = logger;
         _orchestrator = orchestrator;
         _resultAggregator = resultAggregator;
+        _storageService = storageService;
     }
 
     [Function("health")]
@@ -133,7 +139,7 @@ public class CostAnalysisFunctions
             var result = await _orchestrator.ExecuteAnalysisAsync(request);
             _logger.LogInformation("🐛 Depois de ExecuteAnalysisAsync - result: {res}", result == null ? "NULL" : "NOT NULL");
 
-            // � Salvar resultado histórico no Blob Storage
+            // 📦 OPÇÃO B: Salvar no Storage estruturado (data → subscription)
             try
             {
                 var finOpsResult = new FinOpsAnalysisResult
@@ -148,8 +154,16 @@ public class CostAnalysisFunctions
                     Summary = FinOpsResultAggregator.BuildSummary(result.Recommendations)
                 };
 
+                // Salvar usando estrutura OPÇÃO B
+                await _storageService.SaveAsync(
+                    subscriptionId: finOpsResult.SubscriptionId,
+                    analysisResult: finOpsResult,
+                    analysisDateUtc: finOpsResult.ExecutedAt);
+
+                // Manter compatibilidade com o agregador antigo
                 await _resultAggregator.SaveAnalysisResultAsync(finOpsResult);
-                _logger.LogInformation("📦 Resultado salvo no storage histórico");
+                
+                _logger.LogInformation("📦 Resultado salvo em ambos os formatos (OPÇÃO B + legacy)");
             }
             catch (Exception ex)
             {

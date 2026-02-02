@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Configuration;
+using Azure.Storage.Blobs;
 using Gvdasa.FinOpsApi.AzureFunctions.Analyzers;
 using Gvdasa.FinOpsApi.AzureFunctions.Application;
 using Gvdasa.FinOpsApi.AzureFunctions.Services;
@@ -17,8 +19,18 @@ var host = new HostBuilder()
         services.AddScoped<AppServiceAnalyzer>();
         services.AddScoped<CostAnalysisOrchestrator>();
         services.AddScoped<FinOpsResultAggregator>();
+        services.AddScoped<DailySummaryService>();
         
-        Console.WriteLine("✅ NÍVEL 4: Services registrados - UnattachedDiskAnalyzer, StorageAccountAnalyzer, UnusedPublicIpAnalyzer, CostAnalysisOrchestrator, FinOpsResultAggregator");
+        // 🔗 OPÇÃO B: Azure Storage Client (funciona local + Azure)
+        services.AddSingleton(sp =>
+        {
+            var config = sp.GetRequiredService<IConfiguration>();
+            var connectionString = config["AzureWebJobsStorage"];
+            return new BlobServiceClient(connectionString);
+        });
+        services.AddScoped<AnalysisStorageService>();
+        
+        Console.WriteLine("✅ NÍVEL 4: Services registrados - UnattachedDiskAnalyzer, StorageAccountAnalyzer, UnusedPublicIpAnalyzer, CostAnalysisOrchestrator, FinOpsResultAggregator, AnalysisStorageService, DailySummaryService");
     })
     .Build();
 
