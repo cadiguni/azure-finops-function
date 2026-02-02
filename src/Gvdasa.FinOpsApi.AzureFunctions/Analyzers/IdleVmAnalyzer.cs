@@ -36,7 +36,7 @@ public class IdleVmAnalyzer
 
             // 1️⃣ Buscar VMs ligadas via Resource Graph
             var runningVms = await GetRunningVmsAsync(subscriptionId);
-            _logger.LogInformation("🔍 Encontradas {count} VMs em execução", runningVms.Count);
+            _logger.LogInformation("🔍 Encontradas {count} VMs ociosas em execução", runningVms.Count);
 
             // 2️⃣ Para cada VM, coletar métricas + análise
             foreach (var vm in runningVms)

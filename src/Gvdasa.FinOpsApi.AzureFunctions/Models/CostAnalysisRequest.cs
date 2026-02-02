@@ -67,7 +67,7 @@ public class AnalysisIncludeOptions
     /// <summary>
     /// Analisar App Services subutilizados
     /// </summary>
-    public bool AppServices { get; set; } = false;
+    public bool AppServices { get; set; } = true;
     
     /// <summary>
     /// Analisar SQL Databases subutilizados

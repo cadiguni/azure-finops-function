@@ -9,17 +9,20 @@ public class CostAnalysisOrchestrator
     private readonly StorageAccountAnalyzer _storageAnalyzer;
     private readonly UnusedPublicIpAnalyzer _publicIpAnalyzer;
     private readonly IdleVmAnalyzer _idleVmAnalyzer;
+    private readonly AppServiceAnalyzer _appServiceAnalyzer;
 
     public CostAnalysisOrchestrator(
         UnattachedDiskAnalyzer diskAnalyzer, 
         StorageAccountAnalyzer storageAnalyzer,
         UnusedPublicIpAnalyzer publicIpAnalyzer,
-        IdleVmAnalyzer idleVmAnalyzer)
+        IdleVmAnalyzer idleVmAnalyzer,
+        AppServiceAnalyzer appServiceAnalyzer)
     {
         _diskAnalyzer = diskAnalyzer;
         _storageAnalyzer = storageAnalyzer;
         _publicIpAnalyzer = publicIpAnalyzer;
         _idleVmAnalyzer = idleVmAnalyzer;
+        _appServiceAnalyzer = appServiceAnalyzer;
     }
 
     /// <summary>
@@ -76,6 +79,12 @@ public class CostAnalysisOrchestrator
             if (request.AnalysisOptions.IdleVms)
             {
                 tasks.Add(AnalyzeIdleVmsAsync(request));
+            }
+
+            // 🌐 App Services - Análise de utilização
+            if (request.AnalysisOptions.AppServices)
+            {
+                tasks.Add(AnalyzeAppServicesAsync(request));
             }
             
             // Executar todas as análises em paralelo
@@ -262,6 +271,30 @@ public class CostAnalysisOrchestrator
         catch (Exception ex)
         {
             Console.WriteLine($"❌ Erro na análise de VMs ociosas: {ex.Message}");
+            return new List<CostRecommendation>();
+        }
+    }
+
+    /// <summary>
+    /// Análise específica de App Services ociosos
+    /// </summary>
+    private async Task<List<CostRecommendation>> AnalyzeAppServicesAsync(CostAnalysisRequest request)
+    {
+        try
+        {
+            Console.WriteLine("🌐 Iniciando análise de App Services ociosos...");
+            
+            if (request.Scope == "subscription" && !string.IsNullOrEmpty(request.SubscriptionId))
+            {
+                return await _appServiceAnalyzer.AnalyzeAsync(request.SubscriptionId);
+            }
+
+            Console.WriteLine("⚠️ App Services: Escopo não suportado ou SubscriptionId não fornecido");
+            return new List<CostRecommendation>();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Erro na análise de App Services: {ex.Message}");
             return new List<CostRecommendation>();
         }
     }
