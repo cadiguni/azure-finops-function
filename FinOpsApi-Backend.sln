@@ -13,7 +13,7 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Gvdasa.FinOpsApi.WebApi", "
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{CBE62684-A3EA-43A5-B3CE-C40D862BEA53}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Gvdasa.GVmodeloexemploapi.UnitTests", "tests\Unit\Gvdasa.GVmodeloexemploapi.UnitTests.csproj", "{2AAAEFBB-2A38-4E81-8A71-7BBF520D8AEE}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Gvdasa.FinOpsApi.UnitTests", "tests\Unit\Gvdasa.FinOpsApi.UnitTests.csproj", "{2AAAEFBB-2A38-4E81-8A71-7BBF520D8AEE}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Gvdasa.FinOpsApi.Modelos", "src\Gvdasa.FinOpsApi.Modelos\Gvdasa.FinOpsApi.Modelos.csproj", "{DD5753D1-7600-49C2-83FE-0FD17722B7A9}"
 EndProject

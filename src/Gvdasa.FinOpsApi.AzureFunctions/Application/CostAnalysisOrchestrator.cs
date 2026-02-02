@@ -7,11 +7,16 @@ public class CostAnalysisOrchestrator
 {
     private readonly UnattachedDiskAnalyzer _diskAnalyzer;
     private readonly StorageAccountAnalyzer _storageAnalyzer;
+    private readonly UnusedPublicIpAnalyzer _publicIpAnalyzer;
 
-    public CostAnalysisOrchestrator(UnattachedDiskAnalyzer diskAnalyzer, StorageAccountAnalyzer storageAnalyzer)
+    public CostAnalysisOrchestrator(
+        UnattachedDiskAnalyzer diskAnalyzer, 
+        StorageAccountAnalyzer storageAnalyzer,
+        UnusedPublicIpAnalyzer publicIpAnalyzer)
     {
         _diskAnalyzer = diskAnalyzer;
         _storageAnalyzer = storageAnalyzer;
+        _publicIpAnalyzer = publicIpAnalyzer;
     }
 
     /// <summary>
@@ -57,6 +62,11 @@ public class CostAnalysisOrchestrator
             if (request.AnalysisOptions.StorageAccounts)
             {
                 tasks.Add(AnalyzeStorageAccountsAsync(request));
+            }
+            
+            if (request.AnalysisOptions.UnusedPublicIps)
+            {
+                tasks.Add(AnalyzeUnusedPublicIpsAsync(request));
             }
             
             // Executar todas as análises em paralelo
@@ -195,6 +205,30 @@ public class CostAnalysisOrchestrator
         catch (Exception ex)
         {
             Console.WriteLine($"❌ Erro na análise de Storage Accounts: {ex.Message}");
+            return new List<CostRecommendation>();
+        }
+    }
+
+    /// <summary>
+    /// Análise específica de Public IPs não utilizados
+    /// </summary>
+    private async Task<List<CostRecommendation>> AnalyzeUnusedPublicIpsAsync(CostAnalysisRequest request)
+    {
+        try
+        {
+            Console.WriteLine("🌐 Iniciando análise de Public IPs ociosos...");
+            
+            if (request.Scope == "subscription" && !string.IsNullOrEmpty(request.SubscriptionId))
+            {
+                return await _publicIpAnalyzer.AnalyzeAsync(request.SubscriptionId);
+            }
+
+            Console.WriteLine("⚠️ Public IPs: Escopo não suportado ou SubscriptionId não fornecido");
+            return new List<CostRecommendation>();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Erro na análise de Public IPs: {ex.Message}");
             return new List<CostRecommendation>();
         }
     }
