@@ -2,6 +2,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Gvdasa.FinOpsApi.AzureFunctions.Analyzers;
 using Gvdasa.FinOpsApi.AzureFunctions.Application;
+using Gvdasa.FinOpsApi.AzureFunctions.Services;
 
 var host = new HostBuilder()
     .ConfigureFunctionsWorkerDefaults()
@@ -15,8 +16,9 @@ var host = new HostBuilder()
         services.AddScoped<IdleVmAnalyzer>();
         services.AddScoped<AppServiceAnalyzer>();
         services.AddScoped<CostAnalysisOrchestrator>();
+        services.AddScoped<FinOpsResultAggregator>();
         
-        Console.WriteLine("✅ NÍVEL 4: Services registrados - UnattachedDiskAnalyzer, StorageAccountAnalyzer, UnusedPublicIpAnalyzer, CostAnalysisOrchestrator");
+        Console.WriteLine("✅ NÍVEL 4: Services registrados - UnattachedDiskAnalyzer, StorageAccountAnalyzer, UnusedPublicIpAnalyzer, CostAnalysisOrchestrator, FinOpsResultAggregator");
     })
     .Build();
 

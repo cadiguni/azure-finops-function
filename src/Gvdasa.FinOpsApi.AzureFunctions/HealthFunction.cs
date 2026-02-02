@@ -6,18 +6,21 @@ using Microsoft.Extensions.Logging;
 using Gvdasa.FinOpsApi.AzureFunctions.Application;
 using Gvdasa.FinOpsApi.AzureFunctions.Analyzers;
 using Gvdasa.FinOpsApi.AzureFunctions.Models;
+using Gvdasa.FinOpsApi.AzureFunctions.Services;
 
 namespace Gvdasa.FinOpsApi.AzureFunctions;
 
 public class CostAnalysisFunctions
 {
     private readonly CostAnalysisOrchestrator _orchestrator;
+    private readonly FinOpsResultAggregator _resultAggregator;
     private readonly ILogger<CostAnalysisFunctions> _logger;
 
-    public CostAnalysisFunctions(ILogger<CostAnalysisFunctions> logger, CostAnalysisOrchestrator orchestrator)
+    public CostAnalysisFunctions(ILogger<CostAnalysisFunctions> logger, CostAnalysisOrchestrator orchestrator, FinOpsResultAggregator resultAggregator)
     {
         _logger = logger;
         _orchestrator = orchestrator;
+        _resultAggregator = resultAggregator;
     }
 
     [Function("health")]
@@ -130,7 +133,30 @@ public class CostAnalysisFunctions
             var result = await _orchestrator.ExecuteAnalysisAsync(request);
             _logger.LogInformation("🐛 Depois de ExecuteAnalysisAsync - result: {res}", result == null ? "NULL" : "NOT NULL");
 
-            // 📋 Log de contexto sobre resultados em modo real
+            // � Salvar resultado histórico no Blob Storage
+            try
+            {
+                var finOpsResult = new FinOpsAnalysisResult
+                {
+                    AnalysisId = Guid.Parse(result.AnalysisId),
+                    ExecutedAt = result.ExecutedAt,
+                    SubscriptionId = result.SubscriptionId ?? "",
+                    ManagementGroupId = result.ManagementGroupId,
+                    DryRun = result.DryRun,
+                    AnalysisPeriodDays = result.AnalysisPeriodDays,
+                    Recommendations = result.Recommendations,
+                    Summary = FinOpsResultAggregator.BuildSummary(result.Recommendations)
+                };
+
+                await _resultAggregator.SaveAnalysisResultAsync(finOpsResult);
+                _logger.LogInformation("📦 Resultado salvo no storage histórico");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Erro ao salvar resultado histórico - continuando execução");
+            }
+
+            // �📋 Log de contexto sobre resultados em modo real
             if (!request.DryRun && result.Recommendations.Any())
             {
                 _logger.LogInformation("💡 Modo real: {count} recomendações encontradas. Executor de ações ainda não implementado.", result.Recommendations.Count);

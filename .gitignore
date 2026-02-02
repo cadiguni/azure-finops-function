@@ -355,3 +355,6 @@ MigrationBackup/
 
 # Resultado dos testes
 /tests/Unit/Relatorio
+
+#Azurite emulador de armazenamento
+.azurite/
