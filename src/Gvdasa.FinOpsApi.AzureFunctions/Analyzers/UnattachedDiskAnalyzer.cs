@@ -1,6 +1,8 @@
 using System.Text.Json;
 using Azure.Identity;
+using Microsoft.Extensions.Logging;
 using Gvdasa.FinOpsApi.AzureFunctions.Models;
+using Gvdasa.FinOpsApi.AzureFunctions.Services;
 
 namespace Gvdasa.FinOpsApi.AzureFunctions.Analyzers;
 
@@ -8,22 +10,27 @@ public class UnattachedDiskAnalyzer
 {
     private readonly HttpClient _httpClient;
     private readonly DefaultAzureCredential _credential;
+    private readonly ILogger<UnattachedDiskAnalyzer> _logger;
 
-    public UnattachedDiskAnalyzer(HttpClient httpClient)
+    public UnattachedDiskAnalyzer(HttpClient httpClient, ILogger<UnattachedDiskAnalyzer> logger)
     {
         _httpClient = httpClient;
         _credential = new DefaultAzureCredential();
+        _logger = logger;
     }
 
     /// <summary>
     /// Analisa discos não anexados em uma subscription
     /// </summary>
-    public async Task<List<CostRecommendation>> AnalyzeSubscriptionAsync(string subscriptionId)
+    public async Task<StandardAnalyzerResult> AnalyzeSubscriptionAsync(string subscriptionId, int analysisPeriodDays = 7, bool dryRun = true)
     {
-        var recommendations = new List<CostRecommendation>();
+        var findings = new List<StandardFinding>();
 
         try
         {
+            _logger.LogInformation("💽 Token obtido com sucesso");
+            _logger.LogInformation("📊 Executando query KQL:");
+
             // Query KQL otimizada para buscar discos não anexados
             var kqlQuery = $@"
                 Resources
@@ -31,7 +38,7 @@ public class UnattachedDiskAnalyzer
                 | where subscriptionId =~ '{subscriptionId}'
                 | where isnull(properties.managedBy) or properties.managedBy == """"
                 | where properties.diskState =~ 'Unattached'
-                | project 
+                | project
                     resourceId = id,
                     name,
                     resourceGroup,
@@ -42,155 +49,136 @@ public class UnattachedDiskAnalyzer
                     diskState = properties.diskState,
                     timeCreated = properties.timeCreated,
                     tags
-            ";
+                ";
 
-            var disks = await ExecuteResourceGraphQueryAsync(kqlQuery);
+            var token = await _credential.GetTokenAsync(
+                new Azure.Core.TokenRequestContext(new[] { "https://management.azure.com/.default" }));
 
-            foreach (var disk in disks)
+            var resourceGraphPayload = new
             {
-                var recommendation = await CreateDiskRecommendationAsync(disk);
-                if (recommendation != null)
-                {
-                    recommendations.Add(recommendation);
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            // Log error but continue processing
-            Console.WriteLine($"Erro ao analisar discos na subscription {subscriptionId}: {ex.Message}");
-        }
-
-        return recommendations;
-    }
-
-    /// <summary>
-    /// Executa query no Azure Resource Graph
-    /// </summary>
-    private async Task<List<JsonElement>> ExecuteResourceGraphQueryAsync(string query)
-    {
-        try
-        {
-            Console.WriteLine("🔐 Iniciando autenticação Azure...");
-            
-            // Obter token de acesso
-            var tokenRequestContext = new Azure.Core.TokenRequestContext(new[] { "https://management.azure.com/.default" });
-            var tokenResponse = await _credential.GetTokenAsync(tokenRequestContext);
-            
-            Console.WriteLine("✅ Token obtido com sucesso");
-
-            // Preparar requisição para o Resource Graph API
-            var requestBody = new
-            {
-                query = query,
-                options = new { }
+                query = kqlQuery
             };
 
-            var json = JsonSerializer.Serialize(requestBody);
-            Console.WriteLine($"📤 Executando query KQL: {query}");
-            var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            var jsonPayload = JsonSerializer.Serialize(resourceGraphPayload);
+            var content = new StringContent(jsonPayload, System.Text.Encoding.UTF8, "application/json");
 
-            // Configurar headers
             _httpClient.DefaultRequestHeaders.Clear();
-            _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {tokenResponse.Token}");
+            _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {token.Token}");
 
-            // Executar query
-            var response = await _httpClient.PostAsync("https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01", content);
+            var response = await _httpClient.PostAsync(
+                "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01",
+                content);
 
-            if (response.IsSuccessStatusCode)
+            response.EnsureSuccessStatusCode();
+            var jsonResponse = await response.Content.ReadAsStringAsync();
+            var doc = JsonDocument.Parse(jsonResponse);
+
+            _logger.LogInformation("💽 Resource Graph resposta: {response}", jsonResponse);
+
+            var data = doc.RootElement.GetProperty("data").EnumerateArray();
+            var count = 0;
+
+            foreach (var disk in data)
             {
-                var responseContent = await response.Content.ReadAsStringAsync();
-                Console.WriteLine($"📥 Resource Graph resposta: {responseContent}");
-                var result = JsonSerializer.Deserialize<JsonElement>(responseContent);
+                count++;
+                var resourceId = disk.GetProperty("resourceId").GetString() ?? "";
+                var name = disk.GetProperty("name").GetString() ?? "";
+                var location = disk.GetProperty("location").GetString() ?? "";
+                var resourceGroup = disk.GetProperty("resourceGroup").GetString() ?? "";
+                var sku = disk.GetProperty("sku").GetString() ?? "Standard_LRS";
+                var diskSizeGb = disk.GetProperty("diskSizeGb").GetInt32();
 
-                if (result.TryGetProperty("data", out var dataElement))
+                var estimatedMonthlyCost = EstimateDiskMonthlyCost(sku, diskSizeGb);
+                var monthlySavings = estimatedMonthlyCost * 0.98m; // 98% economia ao remover
+
+                var finding = new StandardFinding
                 {
-                    var dataList = dataElement.EnumerateArray().ToList();
-                    Console.WriteLine($"📊 Encontrados {dataList.Count} recursos na query");
-                    return dataList;
-                }
+                    Type = FindingTypes.UNATTACHED_DISK,
+                    ResourceId = resourceId,
+                    ResourceName = name,
+                    ResourceType = "Microsoft.Compute/disks",
+                    SubscriptionId = subscriptionId,
+                    EstimatedMonthlyCost = estimatedMonthlyCost,
+                    EstimatedMonthlySavings = monthlySavings,
+                    Currency = "BRL",
+                    Priority = estimatedMonthlyCost > 150 ? FindingPriorities.HIGH : 
+                              estimatedMonthlyCost > 60 ? FindingPriorities.MEDIUM : FindingPriorities.LOW,
+                    Confidence = 0.95,
+                    Description = $"Disco '{name}' ({sku}, {diskSizeGb}GB) não está anexado há mais de {analysisPeriodDays} dias",
+                    Recommendation = "Considere remover este disco se não for necessário. Faça backup dos dados importantes antes da remoção.",
+                    Metadata = new Dictionary<string, object>
+                    {
+                        { "location", location },
+                        { "resourceGroup", resourceGroup },
+                        { "sku", sku },
+                        { "diskSizeGb", diskSizeGb },
+                        { "unattachedDays", analysisPeriodDays },
+                        { "tags", ExtractTags(disk) }
+                    }
+                };
+
+                findings.Add(finding);
             }
-            else
-            {
-                var errorContent = await response.Content.ReadAsStringAsync();
-                Console.WriteLine($"❌ Erro na query Resource Graph: {response.StatusCode} - {errorContent}");
-            }
-        }
-        catch (Azure.Identity.AuthenticationFailedException authEx)
-        {
-            Console.WriteLine($"❌ Falha de autenticação Azure: {authEx.Message}");
-            Console.WriteLine($"❌ Detalhes: {authEx}");
+
+            _logger.LogInformation("💽 Encontrados {count} recursos na query", count);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"❌ Erro ao executar query Resource Graph: {ex.Message}");
+            _logger.LogError(ex, "❌ Erro durante análise de discos");
         }
 
-        return new List<JsonElement>();
-    }
-
-    /// <summary>
-    /// Cria recomendação baseada nos dados do disco
-    /// </summary>
-    private Task<CostRecommendation?> CreateDiskRecommendationAsync(JsonElement disk)
-    {
-        try
+        var result = new StandardAnalyzerResult
         {
-            var resourceId = disk.GetProperty("resourceId").GetString() ?? "";
-            var name = disk.GetProperty("name").GetString() ?? "";
-            var resourceGroup = disk.GetProperty("resourceGroup").GetString() ?? "";
-            var subscriptionId = disk.GetProperty("subscriptionId").GetString() ?? "";
-            var sku = disk.GetProperty("sku").GetString() ?? "";
-            var diskSizeGb = disk.GetProperty("diskSizeGb").GetInt32();
-
-            // Estimar custo baseado no tipo de disco e tamanho
-            var estimatedMonthlyCost = EstimateDiskMonthlyCost(sku, diskSizeGb);
-
-            // Parse tags
-            var tags = new Dictionary<string, string>();
-            if (disk.TryGetProperty("tags", out var tagsElement) && tagsElement.ValueKind == JsonValueKind.Object)
+            SchemaVersion = "1.0",
+            AnalysisId = Guid.NewGuid().ToString(),
+            Analyzer = AnalyzerNames.UNATTACHED_DISK_ANALYZER,
+            SubscriptionId = subscriptionId,
+            ExecutedAt = DateTime.UtcNow,
+            AnalysisPeriodDays = analysisPeriodDays,
+            DryRun = dryRun,
+            Findings = findings,
+            ExecutionMetadata = new Dictionary<string, object>
             {
-                foreach (var tag in tagsElement.EnumerateObject())
-                {
-                    tags[tag.Name] = tag.Value.GetString() ?? "";
-                }
+                { "totalResourcesAnalyzed", findings.Count },
+                { "analyzerVersion", "2.0" }
             }
-
-            return Task.FromResult<CostRecommendation?>(new CostRecommendation
-            {
-                Type = "UNATTACHED_DISK",
-                ResourceId = resourceId,
-                ResourceName = name,
-                ResourceType = "Microsoft.Compute/disks",
-                ResourceGroup = resourceGroup,
-                SubscriptionId = subscriptionId,
-                EstimatedMonthlySavings = estimatedMonthlyCost,
-                Description = $"Disco '{name}' ({sku}, {diskSizeGb}GB) não está anexado a nenhuma VM há mais tempo. Economia estimada: ${estimatedMonthlyCost:F2}/mês",
-                Priority = estimatedMonthlyCost > 50 ? "High" : estimatedMonthlyCost > 20 ? "Medium" : "Low",
-                Tags = tags
-            });
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Erro ao criar recomendação para disco: {ex.Message}");
-            return Task.FromResult<CostRecommendation?>(null);
-        }
-    }
-
-    /// <summary>
-    /// Estima custo mensal baseado no SKU e tamanho do disco
-    /// </summary>
-    private decimal EstimateDiskMonthlyCost(string sku, int diskSizeGb)
-    {
-        // Preços aproximados por GB/mês (USD) - região East US
-        var pricePerGbPerMonth = sku.ToLowerInvariant() switch
-        {
-            var s when s.Contains("premium") => 0.15m,  // Premium SSD
-            var s when s.Contains("standard") && s.Contains("ssd") => 0.05m,  // Standard SSD
-            var s when s.Contains("standard") => 0.045m,  // Standard HDD
-            _ => 0.05m  // Default fallback
         };
+        
+        var (isValid, errors) = AnalyzerContractValidator.ValidateResult(result);
+        if (!isValid)
+        {
+            _logger.LogWarning("⚠️ Validação falhou: {errors}", string.Join(", ", errors));
+        }
+        
+        return result;
+    }
 
-        return diskSizeGb * pricePerGbPerMonth;
+    private decimal EstimateDiskMonthlyCost(string sku, int sizeGb)
+    {
+        // Preços aproximados por GB/mês em BRL
+        return sku.ToLower() switch
+        {
+            "standard_lrs" => sizeGb * 0.15m,
+            "standard_ssd_lrs" => sizeGb * 0.25m,
+            "premium_lrs" => sizeGb * 0.45m,
+            "standardssd_zrs" => sizeGb * 0.35m,
+            "premium_zrs" => sizeGb * 0.65m,
+            _ => sizeGb * 0.20m // Default
+        };
+    }
+
+    private Dictionary<string, string> ExtractTags(JsonElement resource)
+    {
+        var tags = new Dictionary<string, string>();
+        
+        if (resource.TryGetProperty("tags", out var tagsElement) && tagsElement.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var tag in tagsElement.EnumerateObject())
+            {
+                tags[tag.Name] = tag.Value.GetString() ?? "";
+            }
+        }
+        
+        return tags;
     }
 }

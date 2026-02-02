@@ -116,29 +116,37 @@ public class CostAnalysisOrchestrator
     /// </summary>
     private async Task<List<CostRecommendation>> AnalyzeUnattachedDisksAsync(CostAnalysisRequest request)
     {
-        var recommendations = new List<CostRecommendation>();
-
         try
         {
+            Console.WriteLine("💾 Iniciando análise de discos não anexados...");
+            
             if (request.Scope.Equals("subscription", StringComparison.OrdinalIgnoreCase) && 
                 !string.IsNullOrEmpty(request.SubscriptionId))
             {
-                var diskRecs = await _diskAnalyzer.AnalyzeSubscriptionAsync(request.SubscriptionId);
-                recommendations.AddRange(diskRecs);
+                var standardResult = await _diskAnalyzer.AnalyzeSubscriptionAsync(
+                    request.SubscriptionId,
+                    request.AnalysisPeriodDays,
+                    request.DryRun);
+
+                // Converter StandardFinding para CostRecommendation (compatibilidade)
+                return ConvertToLegacyFormat(standardResult.Findings);
             }
             else if (request.Scope.Equals("managementGroup", StringComparison.OrdinalIgnoreCase))
             {
                 // TODO: Implementar análise por Management Group
                 // Requer listagem de subscriptions no MG
                 Console.WriteLine("Análise por Management Group ainda não implementada");
+                return new List<CostRecommendation>();
             }
+
+            Console.WriteLine("⚠️ Discos: Escopo não suportado ou SubscriptionId não fornecido");
+            return new List<CostRecommendation>();
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Erro ao analisar discos não anexados: {ex.Message}");
+            Console.WriteLine($"❌ Erro ao analisar discos não anexados: {ex.Message}");
+            return new List<CostRecommendation>();
         }
-
-        return recommendations;
     }
 
     /// <summary>
@@ -214,7 +222,13 @@ public class CostAnalysisOrchestrator
             
             if (request.Scope == "subscription" && !string.IsNullOrEmpty(request.SubscriptionId))
             {
-                return await _storageAnalyzer.AnalyzeSubscriptionAsync(request.SubscriptionId);
+                var standardResult = await _storageAnalyzer.AnalyzeSubscriptionAsync(
+                    request.SubscriptionId, 
+                    request.AnalysisPeriodDays, 
+                    request.DryRun);
+
+                // Converter StandardFinding para CostRecommendation (compatibilidade)
+                return ConvertToLegacyFormat(standardResult.Findings);
             }
 
             Console.WriteLine("⚠️ Storage: Escopo não suportado ou SubscriptionId não fornecido");
@@ -238,7 +252,13 @@ public class CostAnalysisOrchestrator
             
             if (request.Scope == "subscription" && !string.IsNullOrEmpty(request.SubscriptionId))
             {
-                return await _publicIpAnalyzer.AnalyzeAsync(request.SubscriptionId);
+                var standardResult = await _publicIpAnalyzer.AnalyzeAsync(
+                    request.SubscriptionId, 
+                    request.AnalysisPeriodDays, 
+                    request.DryRun);
+
+                // Converter StandardFinding para CostRecommendation (compatibilidade)
+                return ConvertToLegacyFormat(standardResult.Findings);
             }
 
             Console.WriteLine("⚠️ Public IPs: Escopo não suportado ou SubscriptionId não fornecido");
@@ -262,7 +282,13 @@ public class CostAnalysisOrchestrator
             
             if (request.Scope == "subscription" && !string.IsNullOrEmpty(request.SubscriptionId))
             {
-                return await _idleVmAnalyzer.AnalyzeAsync(request.SubscriptionId);
+                var standardResult = await _idleVmAnalyzer.AnalyzeAsync(
+                    request.SubscriptionId, 
+                    request.AnalysisPeriodDays, 
+                    request.DryRun);
+
+                // Converter StandardFinding para CostRecommendation (compatibilidade)
+                return ConvertToLegacyFormat(standardResult.Findings);
             }
 
             Console.WriteLine("⚠️ VMs Idle: Escopo não suportado ou SubscriptionId não fornecido");
@@ -286,7 +312,13 @@ public class CostAnalysisOrchestrator
             
             if (request.Scope == "subscription" && !string.IsNullOrEmpty(request.SubscriptionId))
             {
-                return await _appServiceAnalyzer.AnalyzeAsync(request.SubscriptionId);
+                var standardResult = await _appServiceAnalyzer.AnalyzeAsync(
+                    request.SubscriptionId, 
+                    request.AnalysisPeriodDays, 
+                    request.DryRun);
+
+                // Converter StandardFinding para CostRecommendation (compatibilidade)
+                return ConvertToLegacyFormat(standardResult.Findings);
             }
 
             Console.WriteLine("⚠️ App Services: Escopo não suportado ou SubscriptionId não fornecido");
@@ -297,5 +329,35 @@ public class CostAnalysisOrchestrator
             Console.WriteLine($"❌ Erro na análise de App Services: {ex.Message}");
             return new List<CostRecommendation>();
         }
+    }
+
+    /// <summary>
+    /// ⚡ Conversão do StandardFinding (novo) para CostRecommendation (legacy)
+    /// </summary>
+    private List<CostRecommendation> ConvertToLegacyFormat(List<Models.StandardFinding> standardFindings)
+    {
+        return standardFindings.Select(finding => new CostRecommendation
+        {
+            SubscriptionId = finding.SubscriptionId,
+            ResourceId = finding.ResourceId,
+            ResourceName = finding.ResourceName,
+            ResourceType = finding.ResourceType,
+            Priority = finding.Priority,
+            EstimatedMonthlyCost = finding.EstimatedMonthlyCost,
+            PotentialMonthlySavings = finding.EstimatedMonthlySavings,
+            Recommendation = finding.Recommendation,
+            Description = finding.Description,
+            Impact = "Medium", // Usar valor padrão - não está no StandardFinding
+            ImplementationEffort = "Low", // Usar valor padrão - não está no StandardFinding
+            ResourceGroup = finding.Metadata.ContainsKey("resourceGroup") ? 
+                finding.Metadata["resourceGroup"]?.ToString() ?? string.Empty : string.Empty,
+            Location = finding.Metadata.ContainsKey("location") ? 
+                finding.Metadata["location"]?.ToString() ?? string.Empty : string.Empty,
+            Tags = finding.Metadata.ContainsKey("tags") ? 
+                finding.Metadata["tags"] as Dictionary<string, string> ?? new Dictionary<string, string>() 
+                : new Dictionary<string, string>(),
+            LastEvaluationDate = DateTime.UtcNow,
+            Type = finding.Type
+        }).ToList();
     }
 }

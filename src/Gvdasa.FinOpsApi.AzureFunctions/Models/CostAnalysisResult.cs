@@ -54,9 +54,28 @@ public class CostRecommendation
     public string SubscriptionId { get; set; } = string.Empty;
     
     /// <summary>
+    /// Localização do recurso
+    /// </summary>
+    public string Location { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Custo mensal estimado (USD)
+    /// </summary>
+    public decimal EstimatedMonthlyCost { get; set; }
+    
+    /// <summary>
     /// Economia estimada por mês (USD)
     /// </summary>
     public decimal EstimatedMonthlySavings { get; set; }
+    
+    /// <summary>
+    /// Economia mensal potencial (USD) - mesmo que EstimatedMonthlySavings
+    /// </summary>
+    public decimal PotentialMonthlySavings
+    {
+        get => EstimatedMonthlySavings;
+        set => EstimatedMonthlySavings = value;
+    }
     
     /// <summary>
     /// Descrição da recomendação
@@ -64,9 +83,29 @@ public class CostRecommendation
     public string Description { get; set; } = string.Empty;
     
     /// <summary>
+    /// Texto da recomendação
+    /// </summary>
+    public string Recommendation { get; set; } = string.Empty;
+    
+    /// <summary>
     /// Prioridade: High, Medium, Low
     /// </summary>
     public string Priority { get; set; } = "Medium";
+    
+    /// <summary>
+    /// Impacto da recomendação
+    /// </summary>
+    public string Impact { get; set; } = "Medium";
+    
+    /// <summary>
+    /// Esforço de implementação
+    /// </summary>
+    public string ImplementationEffort { get; set; } = "Low";
+    
+    /// <summary>
+    /// Data da última avaliação
+    /// </summary>
+    public DateTime LastEvaluationDate { get; set; } = DateTime.UtcNow;
     
     /// <summary>
     /// Tags do recurso

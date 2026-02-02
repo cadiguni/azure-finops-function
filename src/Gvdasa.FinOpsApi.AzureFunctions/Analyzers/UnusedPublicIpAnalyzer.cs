@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Gvdasa.FinOpsApi.AzureFunctions.Models;
+using Gvdasa.FinOpsApi.AzureFunctions.Services;
 
 namespace Gvdasa.FinOpsApi.AzureFunctions.Analyzers;
 
@@ -17,11 +18,11 @@ public class UnusedPublicIpAnalyzer
         _logger = logger;
     }
 
-    public async Task<List<CostRecommendation>> AnalyzeAsync(string subscriptionId)
+    public async Task<StandardAnalyzerResult> AnalyzeAsync(string subscriptionId, int analysisPeriodDays = 7, bool dryRun = true)
     {
         _logger.LogInformation("🔍 Iniciando análise de Public IPs ociosos para subscription {sub}", subscriptionId);
         
-        var recommendations = new List<CostRecommendation>();
+        var findings = new List<StandardFinding>();
 
         try
         {
@@ -59,6 +60,7 @@ public class UnusedPublicIpAnalyzer
                 {
                     var resourceId = ip.GetProperty("id").GetString() ?? "";
                     var resourceGroup = ExtractResourceGroup(resourceId);
+                    var location = ip.TryGetProperty("location", out var loc) ? loc.GetString() ?? "unknown" : "unknown";
                     
                     // 💰 Custo baseado no SKU
                     var sku = properties.TryGetProperty("publicIPAllocationMethod", out var allocationMethod) 
@@ -66,34 +68,68 @@ public class UnusedPublicIpAnalyzer
                         : "Static";
                     
                     var monthlyCost = sku == "Static" ? 3.65m : 2.50m; // Standard vs Basic
+                    var monthlySavings = monthlyCost * 0.95m; // 95% economia ao remover
                     
-                    recommendations.Add(new CostRecommendation
+                    var finding = new StandardFinding
                     {
-                        Type = "UnusedPublicIp",
+                        Type = FindingTypes.UNUSED_PUBLIC_IP,
                         ResourceId = resourceId,
                         ResourceName = ipName,
                         ResourceType = "Microsoft.Network/publicIPAddresses",
-                        ResourceGroup = resourceGroup,
                         SubscriptionId = subscriptionId,
-                        EstimatedMonthlySavings = monthlyCost,
-                        Priority = "High",
-                        Description = $"Public IP '{ipName}' não está associado a nenhum recurso e pode ser removido. Economize R$ {monthlyCost:F2}/mês.",
-                        Tags = ExtractTags(ip)
-                    });
-
+                        EstimatedMonthlyCost = monthlyCost,
+                        EstimatedMonthlySavings = monthlySavings,
+                        Currency = "BRL",
+                        Priority = FindingPriorities.HIGH,
+                        Confidence = 0.95,
+                        Description = $"Public IP '{ipName}' não está associado a nenhum recurso há mais de {analysisPeriodDays} dias",
+                        Recommendation = "Considere remover este Public IP se não for necessário. Verifique se não há dependências antes da remoção.",
+                        Metadata = new Dictionary<string, object>
+                        {
+                            { "location", location },
+                            { "resourceGroup", resourceGroup },
+                            { "sku", sku ?? "Static" },
+                            { "unusedDays", analysisPeriodDays },
+                            { "tags", ExtractTags(ip) }
+                        }
+                    };
+                    
+                    findings.Add(finding);
                     _logger.LogInformation("💡 Public IP ocioso detectado: {name} (R$ {cost}/mês)", ipName, monthlyCost);
                 }
             }
 
-            _logger.LogInformation("✅ Análise concluída: {count} Public IPs ociosos encontrados", recommendations.Count);
+            _logger.LogInformation("✅ Análise concluída: {count} Public IPs ociosos encontrados", findings.Count);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "❌ Erro ao analisar Public IPs");
-            throw;
         }
 
-        return recommendations;
+        var result = new StandardAnalyzerResult
+        {
+            SchemaVersion = "1.0",
+            AnalysisId = Guid.NewGuid().ToString(),
+            Analyzer = AnalyzerNames.UNUSED_PUBLIC_IP_ANALYZER,
+            SubscriptionId = subscriptionId,
+            ExecutedAt = DateTime.UtcNow,
+            AnalysisPeriodDays = analysisPeriodDays,
+            DryRun = dryRun,
+            Findings = findings,
+            ExecutionMetadata = new Dictionary<string, object>
+            {
+                { "totalResourcesAnalyzed", findings.Count },
+                { "analyzerVersion", "2.0" }
+            }
+        };
+        
+        var (isValid, errors) = AnalyzerContractValidator.ValidateResult(result);
+        if (!isValid)
+        {
+            _logger.LogWarning("⚠️ Validação falhou: {errors}", string.Join(", ", errors));
+        }
+        
+        return result;
     }
 
     private string ExtractResourceGroup(string resourceId)
