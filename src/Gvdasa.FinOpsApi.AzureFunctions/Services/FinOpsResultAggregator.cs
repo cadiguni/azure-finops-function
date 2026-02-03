@@ -48,7 +48,7 @@ public class FinOpsResultAggregator
     }
 
     /// <summary>
-    /// Salva resultado da análise FinOps no Blob Storage
+    /// Salva resultado da análise FinOps no Blob Storage usando estrutura analyses/
     /// </summary>
     public async Task SaveAnalysisResultAsync(FinOpsAnalysisResult result)
     {
@@ -56,13 +56,11 @@ public class FinOpsResultAggregator
         {
             _logger.LogInformation("💾 Processando resultado FinOps: {analysisId}", result.AnalysisId);
 
-            // 🧩 Estrutura de particionamento otimizada para produção
-            // year=2026/month=02/day=02/subscription=abc.../analysisId=xyz.json
-            var blobName = $"year={result.ExecutedAt:yyyy}/" +
-                          $"month={result.ExecutedAt:MM}/" +
-                          $"day={result.ExecutedAt:dd}/" +
-                          $"subscription={result.SubscriptionId}/" +
-                          $"analysisId={result.AnalysisId:N}.json";
+            // 🎯 Nova estrutura: analyses/year=YYYY/month=MM/day=DD/subscription=XXX/raw-analysis.json
+            var blobName = BlobPathBuilder.BuildAnalysisPath(
+                result.ExecutedAt,
+                result.SubscriptionId,
+                BlobPathBuilder.FileNames.RawAnalysis);
 
             // Se storage não disponível, só loga o que salvaria
             if (_containerClient == null)

@@ -97,6 +97,8 @@ public class UnattachedDiskAnalyzer
                     ResourceId = resourceId,
                     ResourceName = name,
                     ResourceType = "Microsoft.Compute/disks",
+                    ResourceGroup = resourceGroup,     // ✅ CORRIGIDO: Campo obrigatório
+                    Location = location,               // ✅ CORRIGIDO: Campo obrigatório
                     SubscriptionId = subscriptionId,
                     EstimatedMonthlyCost = estimatedMonthlyCost,
                     EstimatedMonthlySavings = monthlySavings,
@@ -106,14 +108,12 @@ public class UnattachedDiskAnalyzer
                     Confidence = 0.95,
                     Description = $"Disco '{name}' ({sku}, {diskSizeGb}GB) não está anexado há mais de {analysisPeriodDays} dias",
                     Recommendation = "Considere remover este disco se não for necessário. Faça backup dos dados importantes antes da remoção.",
+                    Tags = ExtractTags(disk),          // ✅ CORRIGIDO: Campo no lugar certo
                     Metadata = new Dictionary<string, object>
                     {
-                        { "location", location },
-                        { "resourceGroup", resourceGroup },
                         { "sku", sku },
                         { "diskSizeGb", diskSizeGb },
-                        { "unattachedDays", analysisPeriodDays },
-                        { "tags", ExtractTags(disk) }
+                        { "unattachedDays", analysisPeriodDays }
                     }
                 };
 

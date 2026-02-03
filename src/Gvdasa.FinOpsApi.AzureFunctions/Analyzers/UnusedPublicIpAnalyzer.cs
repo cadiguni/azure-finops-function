@@ -76,6 +76,8 @@ public class UnusedPublicIpAnalyzer
                         ResourceId = resourceId,
                         ResourceName = ipName,
                         ResourceType = "Microsoft.Network/publicIPAddresses",
+                        ResourceGroup = resourceGroup,     // ✅ CORRIGIDO: Campo obrigatório
+                        Location = location,               // ✅ CORRIGIDO: Campo obrigatório
                         SubscriptionId = subscriptionId,
                         EstimatedMonthlyCost = monthlyCost,
                         EstimatedMonthlySavings = monthlySavings,
@@ -84,13 +86,11 @@ public class UnusedPublicIpAnalyzer
                         Confidence = 0.95,
                         Description = $"Public IP '{ipName}' não está associado a nenhum recurso há mais de {analysisPeriodDays} dias",
                         Recommendation = "Considere remover este Public IP se não for necessário. Verifique se não há dependências antes da remoção.",
+                        Tags = ExtractTags(ip),            // ✅ CORRIGIDO: Campo no lugar certo
                         Metadata = new Dictionary<string, object>
                         {
-                            { "location", location },
-                            { "resourceGroup", resourceGroup },
                             { "sku", sku ?? "Static" },
-                            { "unusedDays", analysisPeriodDays },
-                            { "tags", ExtractTags(ip) }
+                            { "unusedDays", analysisPeriodDays }
                         }
                     };
                     

@@ -105,6 +105,8 @@ public class IdleVmAnalyzer
                         ResourceId = resourceId,
                         ResourceName = name,
                         ResourceType = "Microsoft.Compute/virtualMachines",
+                        ResourceGroup = resourceGroup,     // ✅ CORRIGIDO: Campo obrigatório
+                        Location = location,               // ✅ CORRIGIDO: Campo obrigatório
                         SubscriptionId = subscriptionId,
                         EstimatedMonthlyCost = estimatedMonthlyCost,
                         EstimatedMonthlySavings = monthlySavings,
@@ -114,17 +116,15 @@ public class IdleVmAnalyzer
                         Confidence = 0.8,
                         Description = $"VM '{name}' ({vmSize}) apresenta baixo uso há {analysisPeriodDays} dias (CPU: {avgCpuUsage:F1}%)",
                         Recommendation = "Considere desligar a VM durante períodos de baixo uso ou redimensionar para um SKU menor.",
+                        Tags = ExtractTags(vm),            // ✅ CORRIGIDO: Campo no lugar certo
                         Metadata = new Dictionary<string, object>
                         {
-                            { "location", location },
-                            { "resourceGroup", resourceGroup },
                             { "vmSize", vmSize },
                             { "osType", osType },
                             { "avgCpuUsage", avgCpuUsage },
                             { "avgNetworkIn", avgNetworkIn },
                             { "avgNetworkOut", avgNetworkOut },
-                            { "idleDays", analysisPeriodDays },
-                            { "tags", ExtractTags(vm) }
+                            { "idleDays", analysisPeriodDays }
                         }
                     };
 

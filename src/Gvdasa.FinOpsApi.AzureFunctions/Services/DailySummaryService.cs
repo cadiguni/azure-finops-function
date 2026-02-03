@@ -74,10 +74,11 @@ public class DailySummaryService
             var containerName = _configuration["RESULTS_CONTAINER_NAME"] ?? "cost-analysis";
             var containerClient = _blobServiceClient.GetBlobContainerClient(containerName);
             
-            // Padrão: year=2026/month=02/day=02/subscription=.../analysisId=....json
-            var prefix = $"year={date[..4]}/month={date.Substring(5, 2)}/day={date.Substring(8, 2)}/";
+            // 🎯 FASE B - Usar BlobPathBuilder padronizado para analyses/
+            var analysisDate = DateTime.ParseExact(date, "yyyy-MM-dd", null);
+            var prefix = BlobPathBuilder.BuildAnalysesDailyPrefix(analysisDate);
             
-            _logger.LogInformation("🔍 Buscando blobs com prefixo: {prefix}", prefix);
+            _logger.LogInformation("🔍 Buscando análises com prefixo: {prefix}", prefix);
 
             await foreach (var blobItem in containerClient.GetBlobsAsync(prefix: prefix))
             {
@@ -192,9 +193,9 @@ public class DailySummaryService
             var containerClient = _blobServiceClient.GetBlobContainerClient(containerName);
             await containerClient.CreateIfNotExistsAsync();
 
-            // Estrutura: summary/year=2026/month=02/day=02/summary.json
-            var dateParts = summary.Date.Split('-');
-            var blobName = $"summary/year={dateParts[0]}/month={dateParts[1]}/day={dateParts[2]}/summary.json";
+            // 🎯 FASE B - Path padronizado para summary
+            var summaryDate = DateTime.ParseExact(summary.Date, "yyyy-MM-dd", null);
+            var blobName = BlobPathBuilder.BuildDailySummaryPath(summaryDate);
             
             var blobClient = containerClient.GetBlobClient(blobName);
             

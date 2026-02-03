@@ -119,6 +119,8 @@ public class AppServiceAnalyzer
                         ResourceId = resourceId,
                         ResourceName = name,
                         ResourceType = "Microsoft.Web/serverfarms",
+                        ResourceGroup = resourceGroup,  // ✅ CORRIGIDO: Campo obrigatório
+                        Location = location,            // ✅ CORRIGIDO: Campo obrigatório  
                         SubscriptionId = subscriptionId,
                         EstimatedMonthlyCost = estimatedMonthlyCost,
                         EstimatedMonthlySavings = monthlySavings,
@@ -128,16 +130,14 @@ public class AppServiceAnalyzer
                         Confidence = 0.7,
                         Description = $"App Service Plan '{name}' ({sku}) com baixo uso há {analysisPeriodDays} dias (CPU: {avgCpuUsage:F1}%, Requests: {avgRequests}/h)",
                         Recommendation = "Considere reduzir o SKU do App Service Plan ou consolidar aplicações para reduzir custos.",
+                        Tags = ExtractTags(plan),       // ✅ CORRIGIDO: Campo no lugar certo
                         Metadata = new Dictionary<string, object>
                         {
-                            { "location", location },
-                            { "resourceGroup", resourceGroup },
                             { "sku", sku },
                             { "skuTier", skuTier },
                             { "avgCpuUsage", avgCpuUsage },
                             { "avgRequests", avgRequests },
-                            { "underutilizedDays", analysisPeriodDays },
-                            { "tags", ExtractTags(plan) }
+                            { "underutilizedDays", analysisPeriodDays }
                         }
                     };
 
