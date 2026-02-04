@@ -76,15 +76,24 @@ stages:
         echo '-------- verify variable -------'
         echo "Pipeline.Workspace: $(Pipeline.Workspace)"
         echo "build.artifactstagingdirectory: $(build.artifactstagingdirectory)"
-        echo " ArtifactName: ${{ variables.ArtifactName }}"
+        echo "ArtifactName: ${{ variables.ArtifactName }}"
       displayName: 'Debug variables'
+
+    - script: |
+        echo "Function App Name: $(NomeAplicacao)-$(Setor)-func"
+        echo "NomeAplicacao: $(NomeAplicacao)"
+        echo "Setor: $(Setor)"
+        echo "ServiceConnection: $(ServiceConnection)"
+        # Verificar se a Function App existe
+        az functionapp show --name "$(NomeAplicacao)-$(Setor)-func" --resource-group "$(NomeAplicacao)-$(Setor)-rg" || echo "Function App not found!"
+      displayName: 'Debug Function App'
 
     - task: AzureFunctionApp@1
       displayName: 'Publicando artefatos de build da função'
       inputs:
         azureSubscription: '$(ServiceConnection)'
         appType: 'functionApp'
-        appName: '$(NomeAplicacao)-${{ variables.Setor }}-func'
+        appName: '$(NomeAplicacao)-$(Setor)-func'
         package: "$(Pipeline.Workspace)/FinOps-Back-build-function/${{ variables.ArtifactName }}/${{ variables.ArtifactName }}.zip"
         appSettings: >-
           -AZURE_SUBSCRIPTION_ID $(AZURE_SUBSCRIPTION_ID)
