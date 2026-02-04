@@ -8,18 +8,24 @@ namespace Gvdasa.FinOpsApi.AzureFunctions.Analyzers;
 
 /// <summary>
 /// Analyzer para detectar VMs ligadas mas ociosas (idle)
+/// ✨ V2.0: Agora usa MÉTRICAS REAIS do Azure Monitor
 /// Maior impacto financeiro na plataforma FinOps
 /// </summary>
 public class IdleVmAnalyzer
 {
     private readonly HttpClient _httpClient;
     private readonly DefaultAzureCredential _credential;
+    private readonly AzureMetricsService _metricsService;
     private readonly ILogger<IdleVmAnalyzer> _logger;
 
-    public IdleVmAnalyzer(HttpClient httpClient, ILogger<IdleVmAnalyzer> logger)
+    public IdleVmAnalyzer(
+        HttpClient httpClient, 
+        AzureMetricsService metricsService,
+        ILogger<IdleVmAnalyzer> logger)
     {
         _httpClient = httpClient;
         _credential = new DefaultAzureCredential();
+        _metricsService = metricsService;
         _logger = logger;
     }
 
@@ -88,13 +94,15 @@ public class IdleVmAnalyzer
                 var vmSize = vm.GetProperty("vmSize").GetString() ?? "Standard_B1s";
                 var osType = vm.GetProperty("osType").GetString() ?? "Unknown";
 
-                // Para demo, simular métricas (em produção usaria Azure Monitor)
-                var avgCpuUsage = 2.5; // Simulando CPU baixo
-                var avgNetworkIn = 500; // Bytes/min
-                var avgNetworkOut = 300; // Bytes/min
+                // 🚀 Obter métricas REAIS do Azure Monitor
+                var vmMetrics = await _metricsService.GetVmMetricsAsync(resourceId, analysisPeriodDays);
+                
+                var avgCpuUsage = vmMetrics.AvgCpuPercentage;
+                var totalNetworkGB = vmMetrics.TotalNetworkInGB + vmMetrics.TotalNetworkOutGB;
+                var avgNetworkGBPerDay = totalNetworkGB / analysisPeriodDays;
 
-                // Regra: VM é ociosa se CPU < 5% E NetworkIn+Out < 1KB/min
-                if (avgCpuUsage < 5.0 && (avgNetworkIn + avgNetworkOut) < 1000)
+                // 🎯 Regra: VM é ociosa se CPU < 5% E trafego de rede < 0.1GB/dia
+                if (avgCpuUsage < 5.0 && avgNetworkGBPerDay < 0.1)
                 {
                     var estimatedMonthlyCost = EstimateVmMonthlyCost(vmSize);
                     var monthlySavings = estimatedMonthlyCost * 0.85m; // 85% economia ao desligar
@@ -114,17 +122,19 @@ public class IdleVmAnalyzer
                         Priority = estimatedMonthlyCost > 900 ? FindingPriorities.HIGH : 
                                   estimatedMonthlyCost > 300 ? FindingPriorities.MEDIUM : FindingPriorities.LOW,
                         Confidence = 0.8,
-                        Description = $"VM '{name}' ({vmSize}) apresenta baixo uso há {analysisPeriodDays} dias (CPU: {avgCpuUsage:F1}%)",
+                        Description = $"VM '{name}' ({vmSize}) ociosa há {analysisPeriodDays} dias: CPU {avgCpuUsage:F1}%, Rede {avgNetworkGBPerDay:F2}GB/dia",
                         Recommendation = "Considere desligar a VM durante períodos de baixo uso ou redimensionar para um SKU menor.",
                         Tags = ExtractTags(vm),            // ✅ CORRIGIDO: Campo no lugar certo
                         Metadata = new Dictionary<string, object>
                         {
-                            { "vmSize", vmSize },
-                            { "osType", osType },
-                            { "avgCpuUsage", avgCpuUsage },
-                            { "avgNetworkIn", avgNetworkIn },
-                            { "avgNetworkOut", avgNetworkOut },
-                            { "idleDays", analysisPeriodDays }
+                            ["vmSize"] = vmSize,
+                            ["osType"] = osType,
+                            ["analysisPeriodDays"] = analysisPeriodDays,
+                            ["avgCpuPercentage"] = Math.Round(avgCpuUsage, 2),
+                            ["avgNetworkGBPerDay"] = Math.Round(avgNetworkGBPerDay, 3),
+                            ["totalNetworkInGB"] = Math.Round(vmMetrics.TotalNetworkInGB, 3),
+                            ["totalNetworkOutGB"] = Math.Round(vmMetrics.TotalNetworkOutGB, 3),
+                            ["metricsSource"] = "AzureMonitor" // 🚀 Métricas reais!
                         }
                     };
 

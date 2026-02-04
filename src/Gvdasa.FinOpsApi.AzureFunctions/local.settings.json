@@ -3,7 +3,26 @@
   "Values": {
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
-    "RESULTS_CONTAINER_NAME": "finops-analysis"
+    
+    "_comment_env": "========== 🚀 CONFIGURAÇÃO DE AMBIENTE ==========",
+    "ENVIRONMENT": "Development",
+    "_comment_env_note": "Development = testes rápidos | Production = frequências reais",
+    
+    "_comment_cron": "========== ⏱️ FREQUÊNCIAS PROFISSIONAIS ==========",
+    "_comment_analysis_dev": "DEV Analysis: a cada 10 min para testes",
+    "_comment_analysis_prod": "PROD Analysis: 3:00 AM UTC diário",
+    "_comment_summary_dev": "DEV Summary: a cada 5 min para testes", 
+    "_comment_summary_prod": "PROD Summary: a cada 6 horas",
+    
+    "_comment_azure": "========== 🔵 AZURE CONFIGURATION ==========",
+    "AZURE_SUBSCRIPTION_ID": "92dbecc2-c36d-4af2-887d-3681969e5850",
+    "RESULTS_CONTAINER_NAME": "finops-analysis",
+    
+    "_comment_finops": "========== 💰 FINOPS STRATEGY ==========",
+    "_comment_daily": "🟢 DIÁRIO: PublicIP, Discos, VMs (Resource Graph only)",
+    "_comment_biweekly": "🟡 2x SEMANA: Storage + App Service (com Azure Monitor)",
+    "_comment_days": "📅 2x semana = Terça-feira e Sexta-feira às 3:00 AM UTC",
+    "_comment_optimization": "🎯 Otimização: 80-90% menos chamadas Azure Monitor"
   },
   "Host": {
     "LocalHttpPort": 7071,

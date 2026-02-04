@@ -6,8 +6,9 @@ using Microsoft.Extensions.Logging;
 namespace Gvdasa.FinOpsApi.AzureFunctions.Functions;
 
 /// <summary>
-/// Function que roda diariamente para consolidar análises de custo
-/// Gera summary com rankings, totais e agregações
+/// 📊 Function de Summary - FREQUÊNCIA PROFISSIONAL
+/// 🚀 PRODUÇÃO: Roda a cada 6 horas (4x por dia)
+/// 🧪 DEV: Roda a cada 5 minutos para testes
 /// </summary>
 public class DailySummaryFunction
 {
@@ -23,13 +24,12 @@ public class DailySummaryFunction
     }
 
     /// <summary>
-    /// Executa agregação diária às 01:00 UTC
-    /// Para teste local: "0 */5 * * * *" (a cada 5 min)
-    /// Para produção: "0 0 1 * * *" (01:00 diariamente)
+    /// 🎯 PRODUÇÃO: "0 0 */6 * * *" (a cada 6 horas - 00:00, 06:00, 12:00, 18:00 UTC)
+    /// 🧪 DESENVOLVIMENTO: "0 */5 * * * *" (a cada 5 minutos para testes)
     /// </summary>
     [Function("DailySummary")]
     public async Task RunAsync(
-        [TimerTrigger("0 */5 * * * *")] TimerInfo timer,
+        [TimerTrigger("0 */5 * * * *")] TimerInfo timer, // 🧪 DESENVOLVIMENTO: 5 min | 🚀 PRODUÇÃO: Alterar para "0 0 */6 * * *"
         FunctionContext context)
     {
         _logger.LogInformation("🕐 DailySummaryFunction iniciada em: {time}", DateTime.UtcNow);
