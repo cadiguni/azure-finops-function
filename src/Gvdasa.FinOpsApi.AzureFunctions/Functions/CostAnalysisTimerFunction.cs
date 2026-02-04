@@ -1,5 +1,6 @@
 using Gvdasa.FinOpsApi.AzureFunctions.Application;
 using Gvdasa.FinOpsApi.AzureFunctions.Analyzers;
+using Gvdasa.FinOpsApi.AzureFunctions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -24,36 +25,27 @@ namespace Gvdasa.FinOpsApi.AzureFunctions.Functions;
 public class CostAnalysisTimerFunction
 {
     private readonly CostAnalysisOrchestrator _orchestrator;
-    private readonly UnattachedDiskAnalyzer _diskAnalyzer;
-    private readonly UnusedPublicIpAnalyzer _publicIpAnalyzer;
-    private readonly IdleVmAnalyzer _vmAnalyzer;
-    private readonly StorageAccountAnalyzer _storageAnalyzer;
-    private readonly AppServiceAnalyzer _appServiceAnalyzer;
+    private readonly QueueProcessingService _queueService;
+    private readonly ObservabilityService _observability;
     private readonly IConfiguration _configuration;
     private readonly ILogger<CostAnalysisTimerFunction> _logger;
 
     public CostAnalysisTimerFunction(
         CostAnalysisOrchestrator orchestrator,
-        UnattachedDiskAnalyzer diskAnalyzer,
-        UnusedPublicIpAnalyzer publicIpAnalyzer,
-        IdleVmAnalyzer vmAnalyzer,
-        StorageAccountAnalyzer storageAnalyzer,
-        AppServiceAnalyzer appServiceAnalyzer,
+        QueueProcessingService queueService,
+        ObservabilityService observability,
         IConfiguration configuration,
         ILogger<CostAnalysisTimerFunction> logger)
     {
         _orchestrator = orchestrator;
-        _diskAnalyzer = diskAnalyzer;
-        _publicIpAnalyzer = publicIpAnalyzer;
-        _vmAnalyzer = vmAnalyzer;
-        _storageAnalyzer = storageAnalyzer;
-        _appServiceAnalyzer = appServiceAnalyzer;
+        _queueService = queueService;
+        _observability = observability;
         _configuration = configuration;
         _logger = logger;
     }
 
     /// <summary>
-    /// 🕐 ANÁLISE PRINCIPAL - 3:00 AM UTC todo dia
+    /// 🕐 ANÁLISE PRINCIPAL - Frequência baseada em ambiente
     /// 🎯 Frequência inteligente baseada no dia da semana
     /// 
     /// 🚀 PRODUÇÃO: "0 0 3 * * *" (3:00 AM UTC diariamente)
@@ -61,7 +53,7 @@ public class CostAnalysisTimerFunction
     /// </summary>
     [Function("CostAnalysisTimer")]
     public async Task RunAsync(
-        [TimerTrigger("0 */10 * * * *")] TimerInfo timer, // 🧪 DESENVOLVIMENTO: 10 min | 🚀 PRODUÇÃO: Alterar para "0 0 3 * * *"
+        [TimerTrigger("%CostAnalysisSchedule%")] TimerInfo timer, // 🚀 CONFIGURADO POR VARIÁVEL DE AMBIENTE
         FunctionContext context)
     {
         var startTime = DateTime.UtcNow;
@@ -71,17 +63,17 @@ public class CostAnalysisTimerFunction
 
         try
         {
-            var subscriptionId = _configuration["AZURE_SUBSCRIPTION_ID"] ?? 
-                                "92dbecc2-c36d-4af2-887d-3681969e5850";
+            var subscriptionIds = GetSubscriptionIds();
+            _logger.LogInformation("📅 Processando {count} subscriptions via QUEUE-BASED architecture", subscriptionIds.Count);
 
             // 🟢 ANÁLISES DIÁRIAS (executam todos os dias)
-            await RunDailyAnalysisAsync(subscriptionId);
+            await EnqueueDailyAnalysisAsync(subscriptionIds);
 
             // 🟡 ANÁLISES 2X SEMANA (só nas terças e sextas)
             if (dayOfWeek == DayOfWeek.Tuesday || dayOfWeek == DayOfWeek.Friday)
             {
-                _logger.LogInformation("📅 {dayOfWeek}: Executando análises 2x semana (Storage + App Service)", dayOfWeek);
-                await RunBiWeeklyAnalysisAsync(subscriptionId);
+                _logger.LogInformation("📅 {dayOfWeek}: Enfileirando análises 2x semana (Storage + App Service + VM Idle)", dayOfWeek);
+                await EnqueueBiWeeklyAnalysisAsync(subscriptionIds);
             }
             else
             {
@@ -89,87 +81,60 @@ public class CostAnalysisTimerFunction
             }
 
             var executionTime = DateTime.UtcNow - startTime;
-            _logger.LogInformation("✅ CostAnalysisTimer concluída em {duration}ms", executionTime.TotalMilliseconds);
+            _logger.LogInformation("✅ CostAnalysisTimer concluída - Subscriptions enfileiradas em {duration}ms", executionTime.TotalMilliseconds);
+            
+            // 📊 Registra métrica de sucesso
+            _observability.RecordAnalyzerExecutionTime("TimerOrchestrator", executionTime, true);
         }
         catch (Exception ex)
         {
+            var executionTime = DateTime.UtcNow - startTime;
+            
+            // 📊 Registra erro
+            _observability.RecordError("CostAnalysisTimer", ex);
+            _observability.RecordAnalyzerExecutionTime("TimerOrchestrator", executionTime, false);
+            
             _logger.LogError(ex, "❌ Erro na execução do CostAnalysisTimer");
             throw; // Re-throw para que o Azure marque como falha
         }
     }
 
     /// <summary>
-    /// 🟢 Executa análises DIÁRIAS (rápidas, sem métricas pesadas)
+    /// 🟢 Enfileira análises DIÁRIAS (rápidas, sem métricas pesadas)
+    /// 🚀 QUEUE-BASED: Timer -> Queue -> Parallel Processing
     /// </summary>
-    private async Task RunDailyAnalysisAsync(string subscriptionId)
+    private async Task EnqueueDailyAnalysisAsync(List<string> subscriptionIds)
     {
-        _logger.LogInformation("🟢 Iniciando análises DIÁRIAS...");
+        _logger.LogInformation("🟢 Enfileirando análises DIÁRIAS para {count} subscriptions...", subscriptionIds.Count);
 
-        var dailyTasks = new List<Task>
-        {
-            // ⚡ Public IPs órfãos (rápido - só Resource Graph)
-            Task.Run(async () => 
-            {
-                _logger.LogInformation("📡 Analisando Public IPs órfãos...");
-                var result = await _publicIpAnalyzer.AnalyzeAsync(subscriptionId, 30, false);
-                _logger.LogInformation("📡 Public IPs: {findings} findings em {duration}ms", 
-                    result.Findings.Count, result.ExecutionMetadata.GetValueOrDefault("executionTimeMs", 0));
-            }),
-
-            // 💿 Discos órfãos (rápido - só Resource Graph)
-            Task.Run(async () => 
-            {
-                _logger.LogInformation("💿 Analisando Discos órfãos...");
-                var result = await _diskAnalyzer.AnalyzeSubscriptionAsync(subscriptionId, 30, false);
-                _logger.LogInformation("💿 Discos: {findings} findings em {duration}ms", 
-                    result.Findings.Count, result.ExecutionMetadata.GetValueOrDefault("executionTimeMs", 0));
-            }),
-
-            // 🖥️ VMs paradas (rápido - só status)
-            Task.Run(async () => 
-            {
-                _logger.LogInformation("🖥️ Analisando VMs paradas...");
-                var result = await _vmAnalyzer.AnalyzeAsync(subscriptionId, 30, false);
-                _logger.LogInformation("🖥️ VMs: {findings} findings em {duration}ms", 
-                    result.Findings.Count, result.ExecutionMetadata.GetValueOrDefault("executionTimeMs", 0));
-            })
-        };
-
-        await Task.WhenAll(dailyTasks);
+        await _queueService.EnqueueDailyAnalysisAsync(subscriptionIds);
         
-        _logger.LogInformation("✅ Análises DIÁRIAS concluídas");
+        _logger.LogInformation("✅ Análises DIÁRIAS enfileiradas com sucesso");
     }
 
     /// <summary>
-    /// 🟡 Executa análises 2X SEMANA (pesadas, com métricas do Azure Monitor)
+    /// 🟡 Enfileira análises 2X SEMANA (pesadas, com Azure Monitor)
+    /// 🚀 QUEUE-BASED: Com feature flags e circuit breaker
     /// </summary>
-    private async Task RunBiWeeklyAnalysisAsync(string subscriptionId)
+    private async Task EnqueueBiWeeklyAnalysisAsync(List<string> subscriptionIds)
     {
-        _logger.LogInformation("🟡 Iniciando análises 2X SEMANA...");
+        _logger.LogInformation("🟡 Enfileirando análises 2X SEMANA para {count} subscriptions...", subscriptionIds.Count);
 
-        var biWeeklyTasks = new List<Task>
-        {
-            // 📦 Storage Account com métricas reais (pesado - Azure Monitor)
-            Task.Run(async () => 
-            {
-                _logger.LogInformation("📦 Analisando Storage Accounts (com métricas)...");
-                var result = await _storageAnalyzer.AnalyzeSubscriptionAsync(subscriptionId, 30, false);
-                var optimization = result.ExecutionMetadata.GetValueOrDefault("optimizationPercentage", 0);
-                _logger.LogInformation("📦 Storage: {findings} findings, {optimization:F1}% otimização", 
-                    result.Findings.Count, optimization);
-            }),
-
-            // 🌐 App Service Plans com métricas reais (pesado - Azure Monitor)
-            Task.Run(async () => 
-            {
-                _logger.LogInformation("🌐 Analisando App Service Plans (com métricas)...");
-                var result = await _appServiceAnalyzer.AnalyzeAsync(subscriptionId, 30, false);
-                _logger.LogInformation("🌐 App Services: {findings} findings", result.Findings.Count);
-            })
-        };
-
-        await Task.WhenAll(biWeeklyTasks);
+        await _queueService.EnqueueBiWeeklyAnalysisAsync(subscriptionIds);
         
-        _logger.LogInformation("✅ Análises 2X SEMANA concluídas");
+        _logger.LogInformation("✅ Análises 2X SEMANA enfileiradas com sucesso");
+    }
+
+    /// <summary>
+    /// 📝 Obtém lista de subscriptions (mock - em produção via Azure Resource Graph)
+    /// </summary>
+    private List<string> GetSubscriptionIds()
+    {
+        // 📝 Para demo, usando subscription padrão
+        // 🚀 Em produção: Resource Graph query para listar subscriptions acessíveis
+        var subscriptionId = _configuration["AZURE_SUBSCRIPTION_ID"] ?? 
+                            "92dbecc2-c36d-4af2-887d-3681969e5850";
+        
+        return new List<string> { subscriptionId };
     }
 }

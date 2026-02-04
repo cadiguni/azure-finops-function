@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
+using Azure.Storage.Queues;
+using Azure.Storage.Blobs;
 using Azure.Storage.Blobs;
 using Azure.Identity;
 using Azure.Monitor.Query;
@@ -41,7 +43,20 @@ var host = new HostBuilder()
         
         services.AddScoped<AzureMetricsService>();
         
-        // 🔗 OPÇÃO B: Azure Storage Client (funciona local + Azure)
+        // � ENTERPRISE SERVICES - Queue Processing + Observability + Circuit Breaker
+        services.AddScoped<QueueProcessingService>();
+        services.AddSingleton<CircuitBreakerService>();
+        services.AddSingleton<ObservabilityService>();
+        
+        // 📦 Queue Storage Client para processamento paralelo
+        services.AddSingleton(sp =>
+        {
+            var config = sp.GetRequiredService<IConfiguration>();
+            var connectionString = config["AzureWebJobsStorage"];
+            return new Azure.Storage.Queues.QueueServiceClient(connectionString);
+        });
+        
+        // �🔗 OPÇÃO B: Azure Storage Client (funciona local + Azure)
         services.AddSingleton(sp =>
         {
             var config = sp.GetRequiredService<IConfiguration>();

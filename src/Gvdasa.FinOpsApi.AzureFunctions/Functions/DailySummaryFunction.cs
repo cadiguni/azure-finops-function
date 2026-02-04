@@ -29,7 +29,7 @@ public class DailySummaryFunction
     /// </summary>
     [Function("DailySummary")]
     public async Task RunAsync(
-        [TimerTrigger("0 */5 * * * *")] TimerInfo timer, // 🧪 DESENVOLVIMENTO: 5 min | 🚀 PRODUÇÃO: Alterar para "0 0 */6 * * *"
+        [TimerTrigger("%DailySummarySchedule%")] TimerInfo timer, // 🚀 CONFIGURADO POR VARIÁVEL DE AMBIENTE
         FunctionContext context)
     {
         _logger.LogInformation("🕐 DailySummaryFunction iniciada em: {time}", DateTime.UtcNow);
