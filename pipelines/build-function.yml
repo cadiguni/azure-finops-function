@@ -4,7 +4,7 @@ variables:
   - template: config.yml
   - group: FinOps-func-GVdasa
 
-pool: azp-gvdasa-be-01
+pool: azp-gvdasa-full-01
 
 stages:
   - stage: 'Build_function'

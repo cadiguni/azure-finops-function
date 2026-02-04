@@ -17,7 +17,7 @@ resources:
       source: FinOps-Platform\FinOps-Back-build-function 
       trigger: true
 
-pool: azp-gvdasa-be-01
+pool: azp-gvdasa-full-01
 
 stages:
 - stage: "Deploy_function"
