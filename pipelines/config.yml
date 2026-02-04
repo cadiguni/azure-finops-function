@@ -1,2 +1,2 @@
 variables:
-  ArtifactName: 'FinOpsBuildFunction-${{ variables.Setor }}'
+  ArtifactName: 'FinOpsBuildFunction'
