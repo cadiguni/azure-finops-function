@@ -8,6 +8,12 @@ resource "azurerm_user_assigned_identity" "finops_identity" {
   location            = local.localizacao
   
   tags = local.tags
+  
+  lifecycle {
+    ignore_changes = [
+      tags
+    ]
+  }
 }
 
 # ========================================================================================

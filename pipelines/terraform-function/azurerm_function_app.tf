@@ -9,6 +9,12 @@ resource "azurerm_service_plan" "finops" {
   sku_name            = "Y1"  # Consumption plan
   
   tags = local.tags
+  
+  lifecycle {
+    ignore_changes = [
+      tags
+    ]
+  }
 }
 
 # Function App
@@ -67,4 +73,10 @@ resource "azurerm_linux_function_app" "finops" {
   )
   
   tags = local.tags
+  
+  lifecycle {
+    ignore_changes = [
+      tags
+    ]
+  }
 }

@@ -7,4 +7,10 @@ resource "azurerm_storage_account" "storage" {
   account_replication_type = "LRS"
 
   tags = local.tags
+  
+  lifecycle {
+    ignore_changes = [
+      tags
+    ]
+  }
 }
