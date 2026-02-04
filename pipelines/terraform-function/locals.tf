@@ -5,7 +5,7 @@ locals {
     Setor = "NAP"
   }
 
-  localizacao = "Brazil South"
+  localizacao = "East US 2"
   aplicacao   = var.aplicacao
   setor       = var.setor
 
