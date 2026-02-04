@@ -12,6 +12,5 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Gvdasa.FinOpsApi.Modelos\Gvdasa.FinOpsApi.Modelos.csproj" />
-    <ProjectReference Include="..\Gvdasa.FinOpsApi.Infra\Gvdasa.FinOpsApi.Infra.csproj" />
   </ItemGroup>
 </Project>

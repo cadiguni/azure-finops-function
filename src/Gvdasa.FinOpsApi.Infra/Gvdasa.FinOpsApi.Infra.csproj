@@ -7,12 +7,16 @@
     <RootNamespace>Gvdasa.FinOpsApi.Infra</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="MediatR" Version="12.4.1" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="8.0.1" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
     <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.1" />
     <PackageReference Include="System.Text.Json" Version="8.0.5" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\Gvdasa.FinOpsApi.Domain\Gvdasa.FinOpsApi.Domain.csproj" />
     <ProjectReference Include="..\Gvdasa.FinOpsApi.Modelos\Gvdasa.FinOpsApi.Modelos.csproj" />
   </ItemGroup>
 </Project>

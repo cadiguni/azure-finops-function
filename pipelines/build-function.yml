@@ -25,9 +25,6 @@ stages:
           includeNuGetOrg: true
           projects: |
             src/Gvdasa.FinOpsApi.AzureFunctions/Gvdasa.FinOpsApi.AzureFunctions.csproj
-            src/Gvdasa.FinOpsApi.Domain/Gvdasa.FinOpsApi.Domain.csproj
-            src/Gvdasa.FinOpsApi.Infra/Gvdasa.FinOpsApi.Infra.csproj
-            src/Gvdasa.FinOpsApi.Modelos/Gvdasa.FinOpsApi.Modelos.csproj
 
       - task: DotNetCoreCLI@2
         displayName: Build
@@ -38,9 +35,6 @@ stages:
           includeNuGetOrg: true
           projects: |
             src/Gvdasa.FinOpsApi.AzureFunctions/Gvdasa.FinOpsApi.AzureFunctions.csproj
-            src/Gvdasa.FinOpsApi.Domain/Gvdasa.FinOpsApi.Domain.csproj
-            src/Gvdasa.FinOpsApi.Infra/Gvdasa.FinOpsApi.Infra.csproj
-            src/Gvdasa.FinOpsApi.Modelos/Gvdasa.FinOpsApi.Modelos.csproj
 
       - task: DotNetCoreCLI@2
         displayName: Publish
