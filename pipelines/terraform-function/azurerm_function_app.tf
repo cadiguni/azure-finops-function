@@ -50,7 +50,7 @@ resource "azurerm_linux_function_app" "finops" {
     # FinOps Configuration
     "FinOps__SubscriptionId"             = data.azurerm_client_config.current.subscription_id
     "FinOps__TenantId"                   = data.azurerm_client_config.current.tenant_id
-    "FinOps__StorageAccountName"         = azurerm_storage_account.finops_storage.name
+    "FinOps__StorageAccountName"         = azurerm_storage_account.storage.name
     "FinOps__StorageContainerName"       = "analysis-results"
     
     # Scope Configuration - Centralizar escopo para produção

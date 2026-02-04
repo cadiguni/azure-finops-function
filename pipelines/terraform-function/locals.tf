@@ -18,9 +18,9 @@ locals {
     
     # Configurações da Function
     function_settings = {
-      "FUNCTIONS_WORKER_RUNTIME" = "dotnet-isolated"
-      "WEBSITE_RUN_FROM_PACKAGE" = "1"
-      "FUNCTIONS_EXTENSION_VERSION" = "~4"
+      # Runtime Configuration
+      "FUNCTIONS_WORKER_RUNTIME"           = "dotnet-isolated"
+      "FUNCTIONS_EXTENSION_VERSION"        = "~4"
       "WEBSITE_USE_PLACEHOLDER_DOTNETISOLATED" = "1"
       
       # Configurações específicas do FinOps
@@ -32,140 +32,25 @@ locals {
       "FinOps__Analyzer__LowCpuThreshold" = "5.0"
       "FinOps__Analyzer__DaysInactiveThreshold" = "7"
       
-      # Classificação de ambiente e comportamento
+      # Management Groups
       "FinOps__EnvironmentClassification__ProductionManagementGroups" = jsonencode(["Setores"])
       "FinOps__EnvironmentClassification__NonProductionManagementGroups" = jsonencode(["Visual Studio"])
       "FinOps__Scope__RootManagementGroup" = var.root_management_group
       "FinOps__Behavior__DryRunInProduction" = "true"
       "FinOps__Behavior__AllowAutomationInProduction" = "false"
+      
+      # Queue Configuration
+      "FinOps__Queue__MaxProcessingTime" = "00:30:00"
+      "FinOps__Queue__MaxRetryAttempts" = "3"
+      "FinOps__Queue__BatchSize" = "10"
+      
+      # Analysis Schedules - using NCRON expressions
+      "FinOps__Schedules__CostAnalysis" = "0 */4 * * *"     # Every 4 hours
+      "FinOps__Schedules__DailySummary" = "0 6 * * *"       # Daily at 6 AM
+      
+      # Output Configuration
+      "FinOps__Storage__ResultsContainerName" = "finops-results"
+      "FinOps__Storage__ArchiveAfterDays" = "90"
     }
   }
-
-  # Habilitar alertas apenas para produção
-  alerts_enabled = true  # Sempre habilitado para NAP
-
-  # Configurações para alertas
-  alert_settings = {
-    enabled = local.alerts_enabled
-    interval = {
-      frequency = "PT5M"
-      window_size = "PT15M"
-    }
-    
-    action_groups = local.alerts_enabled ? {
-      "${local.aplicacao}-${local.setor}-ag" = {
-        name = "${local.aplicacao}-${local.setor}-ag"
-        short_name = substr("${local.aplicacao}-${local.setor}-ag", 0, 12)
-        email_receivers = [ ]
-        webhook_receivers = [
-          {
-            name = "TeamsLogicApp"
-          }
-        ]
-      }
-    } : {}
-
-    # Alertas específicos para Cost Optimizer Function
-    function_alerts = local.alerts_enabled ? {
-      "function-failures" = {
-        name = "function-failures"
-        description = "Alerta para falhas na Function do Cost Optimizer"
-        severity = "1"
-        threshold = 5
-      },
-      "function-duration" = {
-        name = "function-duration" 
-        description = "Alerta para execuções longas da Function"
-        severity = "2"
-        threshold = 300000 # 5 minutos em ms
-      }
-    } : {}
-
-    # Lista de alertas de performance
-    performance_cpu_alerts = local.alerts_enabled ? {
-      "high-cpu" = {
-        name = "high-cpu"
-        description = "Alerta de CPU alta"
-        severity = "3"
-        threshold = 80
-        resource_id = azurerm_service_plan.app_plan.id
-      }
-    } : {}
-
-    performance_memory_alerts = local.alerts_enabled ? {
-      "high-memory" = {
-        name = "high-memory"
-        description = "Alerta de memória alta"
-        severity = "3"
-        threshold = 90
-        resource_id = azurerm_service_plan.app_plan.id
-      }
-    } : {}
-
-    # Lista de alertas HTTP
-    http_5xx_alerts = local.alerts_enabled ? {
-      "server-errors" = {
-        name = "server-errors"
-        description = "Alerta de erros 5xx"
-        severity = "1"
-        threshold = 5  # Threshold para NAP
-        resource_id = azurerm_linux_web_app.webapp_a.id
-      }
-    } : {}
-
-    http_403_alerts = local.alerts_enabled ? {
-      "forbidden-errors" = {
-        name = "forbidden-errors"
-        description = "Alerta de erros 403"
-        severity = "2"
-        threshold = 20
-        resource_id = azurerm_linux_web_app.webapp_a.id
-      }
-    } : {}
-
-    response_time_alerts = local.alerts_enabled ? {
-      "slow-response" = {
-        name = "slow-response"
-        description = "Alerta de resposta lenta"
-        severity = "2"
-        threshold = 5000
-        resource_id = azurerm_linux_web_app.webapp_a.id
-      },
-      "slow-response2" = {
-        name = "slow-response"
-        description = "Alerta de resposta lenta"
-        severity = "1"
-        threshold = 500
-        resource_id = azurerm_linux_web_app.webapp_a.id
-      }
-    } : {}
-
-    # Lista de alertas de disponibilidade
-    availability_alerts = local.alerts_enabled ? {
-      "availability" = {
-        name = "availability"
-        description = "Alerta de disponibilidade"
-        severity = "1"
-        threshold = 99.9
-        resource_id = azurerm_linux_web_app.webapp_a.id
-      }
-    } : {}
-
-    # Lista de alertas de App Service Plan
-    app_service_plan_queue_alerts = local.alerts_enabled ? {
-      "http-queue-length" = {
-        name = "http-queue-length"
-        description = "Alerta de fila HTTP longa, indicando possível gargalo de requisições"
-        severity = "2"
-        threshold = 10
-        resource_id = azurerm_service_plan.app_plan.id
-      }
-    } : {}
-  }
-
-  # Variável auxiliar para action group
-  action_group_id = try(azurerm_monitor_action_group.action_groups[keys(local.alert_settings.action_groups)[0]].id, null)
 }
-
-# Data source para obter informações da assinatura atual
-data "azurerm_subscription" "current" {}
