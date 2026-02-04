@@ -63,6 +63,17 @@ public static class BlobPathBuilder
     }
 
     /// <summary>
+    /// Gera path para top 10 diário (sem subscription)  
+    /// </summary>
+    public static string BuildDailyTop10Path(DateTime date)
+    {
+        return $"summaries/year={date:yyyy}/" +
+               $"month={date:MM}/" +
+               $"day={date:dd}/" +
+               "top10.json";
+    }
+
+    /// <summary>
     /// Padroniza nomes de arquivos FinOps
     /// </summary>
     public static class FileNames

@@ -1,5 +1,7 @@
 using Gvdasa.FinOpsApi.AzureFunctions.Analyzers;
 using Gvdasa.FinOpsApi.AzureFunctions.Models;
+using Gvdasa.FinOpsApi.AzureFunctions.Services;
+using Microsoft.Extensions.Logging;
 
 namespace Gvdasa.FinOpsApi.AzureFunctions.Application;
 
@@ -10,19 +12,25 @@ public class CostAnalysisOrchestrator
     private readonly UnusedPublicIpAnalyzer _publicIpAnalyzer;
     private readonly IdleVmAnalyzer _idleVmAnalyzer;
     private readonly AppServiceAnalyzer _appServiceAnalyzer;
+    private readonly AnalysisStorageService _storageService;
+    private readonly ILogger<CostAnalysisOrchestrator> _logger;
 
     public CostAnalysisOrchestrator(
         UnattachedDiskAnalyzer diskAnalyzer, 
         StorageAccountAnalyzer storageAnalyzer,
         UnusedPublicIpAnalyzer publicIpAnalyzer,
         IdleVmAnalyzer idleVmAnalyzer,
-        AppServiceAnalyzer appServiceAnalyzer)
+        AppServiceAnalyzer appServiceAnalyzer,
+        AnalysisStorageService storageService,
+        ILogger<CostAnalysisOrchestrator> logger)
     {
         _diskAnalyzer = diskAnalyzer;
         _storageAnalyzer = storageAnalyzer;
         _publicIpAnalyzer = publicIpAnalyzer;
         _idleVmAnalyzer = idleVmAnalyzer;
         _appServiceAnalyzer = appServiceAnalyzer;
+        _storageService = storageService;
+        _logger = logger;
     }
 
     /// <summary>
@@ -359,5 +367,72 @@ public class CostAnalysisOrchestrator
             LastEvaluationDate = DateTime.UtcNow,
             Type = finding.Type
         }).ToList();
+    }
+
+    /// <summary>
+    /// 🏆 NOVO: Constrói Top 10 automático das maiores economias do dia
+    /// Pipeline: ler recommendations.json → normalizar → ordenar → salvar top10.json
+    /// </summary>
+    public async Task<DailyTop10Result?> BuildTop10Async(DateTime analysisDate)
+    {
+        try
+        {
+            _logger.LogInformation("🏆 Iniciando construção do Top 10 para {date}", analysisDate.ToString("yyyy-MM-dd"));
+
+            // 1️⃣ Ler todos os recommendations.json do dia
+            var allRecommendations = await _storageService.GetDailyAnalysisAsync(analysisDate);
+            
+            if (!allRecommendations.Any())
+            {
+                _logger.LogWarning("📄 Nenhuma recomendação encontrada para {date}", analysisDate.ToString("yyyy-MM-dd"));
+                return null;
+            }
+
+            // 2️⃣ Normalizar para TopSavingCandidate
+            var candidates = allRecommendations.Select(rec => new TopSavingCandidate
+            {
+                SubscriptionId = rec.SubscriptionId,
+                ResourceType = rec.ResourceType,
+                ResourceName = rec.ResourceName,
+                ResourceId = rec.ResourceId,
+                EstimatedMonthlySavings = rec.PotentialMonthlySavings,
+                AnalyzerType = rec.Type,
+                Priority = rec.Priority,
+                Description = rec.Description
+            }).ToList();
+
+            // 3️⃣ Ordenar por economia e pegar Top 10
+            var top10 = candidates
+                .OrderByDescending(x => x.EstimatedMonthlySavings)
+                .Take(10)
+                .Select((candidate, index) => 
+                {
+                    candidate.Rank = index + 1;
+                    return candidate;
+                })
+                .ToList();
+
+            // 4️⃣ Calcular estatísticas
+            var uniqueSubscriptions = candidates.Select(c => c.SubscriptionId).Distinct().Count();
+            var totalSavings = candidates.Sum(c => c.EstimatedMonthlySavings);
+
+            var result = new DailyTop10Result
+            {
+                Date = analysisDate.ToString("yyyy-MM-dd"),
+                TotalSubscriptions = uniqueSubscriptions,
+                TotalSavings = totalSavings,
+                Top10 = top10
+            };
+
+            _logger.LogInformation("🏆 Top 10 construído: {total} recomendações, R$ {savings} economia total", 
+                candidates.Count, totalSavings);
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ Erro ao construir Top 10 para {date}", analysisDate.ToString("yyyy-MM-dd"));
+            return null;
+        }
     }
 }

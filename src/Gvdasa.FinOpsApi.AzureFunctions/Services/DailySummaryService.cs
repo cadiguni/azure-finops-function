@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Azure.Storage.Blobs;
+using Gvdasa.FinOpsApi.AzureFunctions.Application;
 using Gvdasa.FinOpsApi.AzureFunctions.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -14,22 +15,26 @@ public class DailySummaryService
     private readonly BlobServiceClient _blobServiceClient;
     private readonly IConfiguration _configuration;
     private readonly ILogger<DailySummaryService> _logger;
+    private readonly CostAnalysisOrchestrator _orchestrator;
     
     private readonly JsonSerializerOptions _jsonOptions;
 
     public DailySummaryService(
         BlobServiceClient blobServiceClient,
         IConfiguration configuration,
-        ILogger<DailySummaryService> logger)
+        ILogger<DailySummaryService> logger,
+        CostAnalysisOrchestrator orchestrator)
     {
         _blobServiceClient = blobServiceClient;
         _configuration = configuration;
         _logger = logger;
+        _orchestrator = orchestrator;
         
         _jsonOptions = new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true,
-            WriteIndented = true
+            WriteIndented = true,
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
         };
     }
 
@@ -51,6 +56,11 @@ public class DailySummaryService
             
             // 3. Salvar summary
             await SaveSummaryAsync(summary);
+            
+            // 4. Gerar e salvar Top 10
+            var analysisDate = DateTime.ParseExact(date, "yyyy-MM-dd", null);
+            var top10 = await _orchestrator.BuildTop10Async(analysisDate);
+            await SaveTop10Async(date, top10);
             
             _logger.LogInformation("✅ Summary gerado: {totalSavings:C} de economia potencial", summary.TotalPotentialSavings);
             return summary;
@@ -82,19 +92,26 @@ public class DailySummaryService
 
             await foreach (var blobItem in containerClient.GetBlobsAsync(prefix: prefix))
             {
+                // 🎯 FILTRAR APENAS recommendations.json (não raw-analysis.json)
+                if (!blobItem.Name.EndsWith("recommendations.json"))
+                {
+                    _logger.LogDebug("⏭️ Ignorando blob: {blobName}", blobItem.Name);
+                    continue;
+                }
+
                 try
                 {
                     var blobClient = containerClient.GetBlobClient(blobItem.Name);
                     var content = await blobClient.DownloadContentAsync();
                     var contentStr = content.Value.Content.ToString();
                     
-                    // Tentar deserializar como FinOpsAnalysisResult (formato atual)
-                    var analysisResult = JsonSerializer.Deserialize<FinOpsAnalysisResult>(contentStr, _jsonOptions);
+                    // 🎯 NOVO FORMATO: recommendations.json é agora uma lista direta
+                    var recommendations = JsonSerializer.Deserialize<List<StandardFinding>>(contentStr, _jsonOptions);
                     
-                    if (analysisResult?.Recommendations != null)
+                    if (recommendations != null)
                     {
                         // Converter recomendações para CostFinding
-                        foreach (var rec in analysisResult.Recommendations)
+                        foreach (var rec in recommendations)
                         {
                             var finding = new CostFinding
                             {
@@ -113,7 +130,7 @@ public class DailySummaryService
                             allFindings.Add(finding);
                         }
                         
-                        _logger.LogDebug("📄 Processado blob: {name} ({count} findings)", blobItem.Name, analysisResult.Recommendations.Count);
+                        _logger.LogDebug("📄 Processado blob: {name} ({count} findings)", blobItem.Name, recommendations.Count);
                     }
                 }
                 catch (Exception ex)
@@ -209,6 +226,34 @@ public class DailySummaryService
         catch (Exception ex)
         {
             _logger.LogError(ex, "❌ Erro ao salvar summary");
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 🏆 Salva Top 10 diário
+    /// </summary>
+    public async Task SaveTop10Async(string date, DailyTop10Result top10Result)
+    {
+        try
+        {
+            var containerName = _configuration["RESULTS_CONTAINER_NAME"] ?? "finops-analysis";
+            var containerClient = _blobServiceClient.GetBlobContainerClient(containerName);
+            
+            var blobName = BlobPathBuilder.BuildDailyTop10Path(DateTime.Parse(date));
+            var blobClient = containerClient.GetBlobClient(blobName);
+            
+            var json = JsonSerializer.Serialize(top10Result, _jsonOptions);
+            using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json));
+            
+            await blobClient.UploadAsync(stream, overwrite: true);
+            
+            _logger.LogInformation("🏆 Top 10 salvo em: {blobName} ({count} economias)", 
+                blobName, top10Result.Top10.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ Erro ao salvar Top 10");
             throw;
         }
     }
