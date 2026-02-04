@@ -1,7 +1,7 @@
 locals {
   dominio = "gvdasa.com.br"
   tags = {
-    Responsável = "tbauer@gvdasa.com.br"
+    Responsável = "lcadiguni@gvdasa.com.br"
     Setor = "NAP"
   }
 

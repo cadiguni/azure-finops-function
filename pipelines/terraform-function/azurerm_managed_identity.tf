@@ -1,11 +1,6 @@
 # Data source para configuração atual do cliente
 data "azurerm_client_config" "current" {}
 
-# Data source para o Management Group "Geral"
-data "azurerm_management_group" "root" {
-  display_name = "Geral"  # Usando display_name em vez de name
-}
-
 # Managed Identity para a Function App
 resource "azurerm_user_assigned_identity" "finops_identity" {
   name                = local.finops_settings.managed_identity_name
@@ -15,18 +10,20 @@ resource "azurerm_user_assigned_identity" "finops_identity" {
   tags = local.tags
 }
 
-# Role assignment para Reader no Management Group "Geral"
-# Isso permite acesso a todas as subscriptions dentro de "Geral"
-resource "azurerm_role_assignment" "mg_reader" {
-  scope                = data.azurerm_management_group.root.id
-  role_definition_name = "Reader"
-  principal_id         = azurerm_user_assigned_identity.finops_identity.principal_id
-}
-
-# Role assignment para Cost Management Reader no Management Group "Geral"  
-# Permite leitura de custos em toda a hierarquia do "Geral"
-resource "azurerm_role_assignment" "mg_cost_reader" {
-  scope                = data.azurerm_management_group.root.id
-  role_definition_name = "Cost Management Reader"
-  principal_id         = azurerm_user_assigned_identity.finops_identity.principal_id
-}
+# ========================================================================================
+# PERMISSÕES MANUAIS NECESSÁRIAS APÓS O DEPLOY:
+# ========================================================================================
+# 
+# Depois do deploy, configure manualmente estas permissões para a Managed Identity:
+#
+# 1. No Azure Portal, vá para "Management Groups" → "Geral"
+# 2. Clique em "Access control (IAM)" → "Add role assignment" 
+# 3. Adicione estas roles para a Managed Identity "finopsplatform-nap-identity":
+#    - Reader
+#    - Cost Management Reader
+#
+# OU via Azure CLI:
+# az role assignment create --assignee $(az identity show --name finopsplatform-nap-identity --resource-group finopsplatform-nap-rg --query principalId -o tsv) --role "Reader" --scope "/providers/Microsoft.Management/managementGroups/Geral"
+# az role assignment create --assignee $(az identity show --name finopsplatform-nap-identity --resource-group finopsplatform-nap-rg --query principalId -o tsv) --role "Cost Management Reader" --scope "/providers/Microsoft.Management/managementGroups/Geral"
+#
+# ========================================================================================
