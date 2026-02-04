@@ -14,6 +14,7 @@ public class AppServiceAnalyzer
 {
     private readonly HttpClient _httpClient;
     private readonly DefaultAzureCredential _credential;
+    private readonly AzureMetricsService _metricsService;
     private readonly ILogger<AppServiceAnalyzer> _logger;
 
     // 💰 Tabela de preços aproximados (ordem de grandeza para FinOps) em BRL
@@ -32,10 +33,14 @@ public class AppServiceAnalyzer
         { "P3v2", 584m }
     };
 
-    public AppServiceAnalyzer(HttpClient httpClient, ILogger<AppServiceAnalyzer> logger)
+    public AppServiceAnalyzer(
+        HttpClient httpClient, 
+        AzureMetricsService metricsService,
+        ILogger<AppServiceAnalyzer> logger)
     {
         _httpClient = httpClient;
         _credential = new DefaultAzureCredential();
+        _metricsService = metricsService;
         _logger = logger;
     }
 
@@ -103,12 +108,57 @@ public class AppServiceAnalyzer
                 var sku = plan.GetProperty("sku").GetString() ?? "B1";
                 var skuTier = plan.GetProperty("skuTier").GetString() ?? "Basic";
 
-                // Para demo, simular métricas baixas (em produção usaria Azure Monitor)
-                var avgCpuUsage = 3.2; // Simulando CPU baixo
-                var avgRequests = 45; // Requests/hour baixo
+                // 📊 MÉTRICAS REAIS DO AZURE MONITOR
+                _logger.LogDebug("📊 Buscando métricas reais para {resourceId}", resourceId);
+                
+                // 1. CPU do App Service Plan
+                var avgCpuUsage = await _metricsService.GetAppServicePlanCpuAsync(resourceId, analysisPeriodDays);
+                
+                // 2. Descobrir Web Apps vinculados ao plan
+                var webApps = await _metricsService.GetWebAppsInPlanAsync(resourceId);
+                
+                // 3. Requests totais dos Web Apps
+                var avgRequests = await _metricsService.GetTotalRequestsAsync(webApps, analysisPeriodDays);
+                
+                _logger.LogInformation("📈 Plan {name}: CPU={cpu:F1}%, Requests={requests}/h, WebApps={webAppCount} ({webAppStatus})", 
+                    name, avgCpuUsage, avgRequests, webApps.Count,
+                    webApps.Count == 0 ? "órfão" : "com apps");
 
-                // Regra: App Service é ocioso se CPU < 10% E Requests < 100/hour
-                if (avgCpuUsage < 10.0 && avgRequests < 100)
+                // 🎯 Regras de detecção baseadas em métricas reais
+                var isUnderutilized = false;
+                var reasonDetails = new List<string>();
+
+                // Regra 1: CPU baixo - mais realista para ambiente corporativo
+                if (avgCpuUsage < 25.0) // Aumentado de 10% para 25%
+                {
+                    reasonDetails.Add($"CPU baixo: {avgCpuUsage:F1}%");
+                }
+
+                // Regra 2: Poucos requests (< 500/h agora é considerado baixo)
+                // ✅ Com Resource Graph, agora temos Web Apps reais e requests reais
+                if (avgRequests < 500) // Aumentado de 100 para 500
+                {
+                    var requestsMessage = webApps.Count == 0 
+                        ? "Plan órfão (sem Web Apps)" 
+                        : $"Requests baixos: {avgRequests}/h";
+                    reasonDetails.Add(requestsMessage);
+                }
+
+                // Regra 3: Plan sem Web Apps (órfão)
+                if (webApps.Count == 0)
+                {
+                    reasonDetails.Add("Plan sem aplicações");
+                }
+
+                // 🧠 Lógica mais inteligente de detecção:
+                // - Plan órfão = sempre subutilizado
+                // - CPU baixo (< 25%) + poucos requests (< 500/h) = subutilizado 
+                // - CPU muito baixo (< 15%) mesmo com requests = subutilizado
+                isUnderutilized = webApps.Count == 0 || // Plan órfão
+                                 (avgCpuUsage < 25.0 && avgRequests < 500) || // Ambos baixos
+                                 avgCpuUsage < 15.0; // CPU muito baixo independente
+
+                if (isUnderutilized)
                 {
                     var estimatedMonthlyCost = GetAppServicePlanCost(sku);
                     var monthlySavings = estimatedMonthlyCost * 0.75m; // 75% economia ao otimizar
@@ -127,9 +177,13 @@ public class AppServiceAnalyzer
                         Currency = "BRL",
                         Priority = estimatedMonthlyCost > 200 ? FindingPriorities.HIGH : 
                                   estimatedMonthlyCost > 100 ? FindingPriorities.MEDIUM : FindingPriorities.LOW,
-                        Confidence = 0.7,
-                        Description = $"App Service Plan '{name}' ({sku}) com baixo uso há {analysisPeriodDays} dias (CPU: {avgCpuUsage:F1}%, Requests: {avgRequests}/h)",
-                        Recommendation = "Considere reduzir o SKU do App Service Plan ou consolidar aplicações para reduzir custos.",
+                        Confidence = webApps.Count == 0 ? 0.9 : 0.7, // Mais confiança em plans órfãos
+                        Description = $"App Service Plan '{name}' ({sku}) subutilizado há {analysisPeriodDays} dias: {string.Join(", ", reasonDetails)}. Apps vinculadas: {webApps.Count}",
+                        Recommendation = webApps.Count == 0 
+                            ? "Plan sem aplicações - considere remover para economizar custos."
+                            : avgCpuUsage < 5.0 
+                                ? "Considere migrar para um SKU menor (downgrade) ou consolidar com outros plans."
+                                : "Monitore uso e considere otimização ou consolidação.",
                         Tags = ExtractTags(plan),       // ✅ CORRIGIDO: Campo no lugar certo
                         Metadata = new Dictionary<string, object>
                         {
