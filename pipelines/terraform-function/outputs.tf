@@ -62,9 +62,9 @@ output "application_name" {
   value       = local.aplicacao
 }
 
-output "ambiente" {
-  description = "Ambiente da aplicação"
-  value       = local.ambiente
+output "setor" {
+  description = "Setor da aplicação"
+  value       = local.setor
 }
 
 output "location" {
@@ -74,5 +74,5 @@ output "location" {
 
 output "resource_group_name" {
   description = "Nome do Resource Group"
-  value       = local.ambiente == "prod" ? data.azurerm_resource_group.rg[0].name : azurerm_resource_group.rg[0].name
+  value       = azurerm_resource_group.rg.name
 }

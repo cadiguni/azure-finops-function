@@ -1,7 +1,7 @@
 variable "aplicacao" {
   type = string
 }
-variable "ambiente" {
+variable "setor" {
   type = string
 }
 

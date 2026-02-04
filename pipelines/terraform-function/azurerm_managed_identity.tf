@@ -6,7 +6,7 @@ data "azurerm_management_group" "root" {
 # Managed Identity para a Function App
 resource "azurerm_user_assigned_identity" "finops_identity" {
   name                = local.finops_settings.managed_identity_name
-  resource_group_name = local.ambiente == "prod" ? data.azurerm_resource_group.rg[0].name : azurerm_resource_group.rg[0].name
+  resource_group_name = azurerm_resource_group.rg.name
   location            = local.localizacao
   
   tags = local.tags

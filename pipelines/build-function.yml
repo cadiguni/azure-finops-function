@@ -24,7 +24,7 @@ stages:
           vstsFeed: 'Feed_NAP'
           includeNuGetOrg: true
           projects: |
-            src/Gvdasa.FinOpsApi.WebApi/Gvdasa.FinOpsApi.WebApi.csproj
+            src/Gvdasa.FinOpsApi.AzureFunctions/Gvdasa.FinOpsApi.AzureFunctions.csproj
             src/Gvdasa.FinOpsApi.Domain/Gvdasa.FinOpsApi.Domain.csproj
             src/Gvdasa.FinOpsApi.Infra/Gvdasa.FinOpsApi.Infra.csproj
             src/Gvdasa.FinOpsApi.Modelos/Gvdasa.FinOpsApi.Modelos.csproj
@@ -37,7 +37,7 @@ stages:
           vstsFeed: 'Feed_NAP'
           includeNuGetOrg: true
           projects: |
-            src/Gvdasa.FinOpsApi.WebApi/Gvdasa.FinOpsApi.WebApi.csproj
+            src/Gvdasa.FinOpsApi.AzureFunctions/Gvdasa.FinOpsApi.AzureFunctions.csproj
             src/Gvdasa.FinOpsApi.Domain/Gvdasa.FinOpsApi.Domain.csproj
             src/Gvdasa.FinOpsApi.Infra/Gvdasa.FinOpsApi.Infra.csproj
             src/Gvdasa.FinOpsApi.Modelos/Gvdasa.FinOpsApi.Modelos.csproj
@@ -47,14 +47,14 @@ stages:
         inputs:
           command: publish
           publishWebProjects: false
-          feedsToUse: 'select'
-          vstsFeed: 'Feed_NAP'
-          includeNuGetOrg: true
-          projects: 'src/Gvdasa.FinOpsApi.WebApi/Gvdasa.FinOpsApi.WebApi.csproj'
-          arguments: '--configuration Release --output $(build.artifactstagingdirectory)'
+          modifyOutputPath: true
+          arguments: ' src/Gvdasa.FinOpsApi.AzureFunctions/Gvdasa.FinOpsApi.AzureFunctions.csproj --configuration Release --output $(build.artifactstagingdirectory)/${{ variables.ArtifactName }}'
+          zipAfterPublish: True
 
-      - task: PublishBuildArtifacts@1
-        displayName: 'Publish Artifact'
-        inputs:
-          PathtoPublish: '$(build.artifactstagingdirectory)'
-          ArtifactName: '${{ variables.ArtifactName }}'
+      - script: |
+            echo "build.artifactstagingdirectory: $(build.artifactstagingdirectory)/${{ variables.ArtifactName }}"
+        displayName: 'debug variables'
+
+      - publish: $(Build.ArtifactStagingDirectory)/${{ variables.ArtifactName }}
+        artifact: '${{ variables.ArtifactName }}'
+        condition: succeeded()

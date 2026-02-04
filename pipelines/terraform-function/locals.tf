@@ -1,22 +1,20 @@
 locals {
   dominio = "gvdasa.com.br"
   tags = {
-    Responsável = var.ambiente == "prod" ? "tbauer@gvdasa.com.br" : "lholdefer@gvdasa.com.br"
-    Setor = "SB"
+    Responsável = "tbauer@gvdasa.com.br"
+    Setor = "NAP"
   }
 
-  localizacao = var.ambiente == "prod" ? "Brazil South" : "East US"
+  localizacao = "Brazil South"
   aplicacao   = var.aplicacao
-  ambiente    = var.ambiente
-
-  team_webhook_url = var.webhookUrlTeams
+  setor       = var.setor
 
   # Configurações específicas do FinOps
   finops_settings = {
-    function_app_name = "${local.aplicacao}-${local.ambiente}-func"
-    app_service_plan_name = "${local.aplicacao}-${local.ambiente}-plan"
-    application_insights_name = "${local.aplicacao}-${local.ambiente}-ai"
-    managed_identity_name = "${local.aplicacao}-${local.ambiente}-identity"
+    function_app_name = "${local.aplicacao}-${local.setor}-func"
+    app_service_plan_name = "${local.aplicacao}-${local.setor}-plan"
+    application_insights_name = "${local.aplicacao}-${local.setor}-ai"
+    managed_identity_name = "${local.aplicacao}-${local.setor}-identity"
     
     # Configurações da Function
     function_settings = {
@@ -44,7 +42,7 @@ locals {
   }
 
   # Habilitar alertas apenas para produção
-  alerts_enabled = local.ambiente == "prod"
+  alerts_enabled = true  # Sempre habilitado para NAP
 
   # Configurações para alertas
   alert_settings = {
@@ -55,9 +53,9 @@ locals {
     }
     
     action_groups = local.alerts_enabled ? {
-      "${local.aplicacao}-${local.ambiente}-ag" = {
-        name = "${local.aplicacao}-${local.ambiente}-ag"
-        short_name = substr("${local.aplicacao}-${local.ambiente}-ag", 0, 12)
+      "${local.aplicacao}-${local.setor}-ag" = {
+        name = "${local.aplicacao}-${local.setor}-ag"
+        short_name = substr("${local.aplicacao}-${local.setor}-ag", 0, 12)
         email_receivers = [ ]
         webhook_receivers = [
           {
@@ -110,7 +108,7 @@ locals {
         name = "server-errors"
         description = "Alerta de erros 5xx"
         severity = "1"
-        threshold = local.ambiente == "prod" ? 5 : 10
+        threshold = 5  # Threshold para NAP
         resource_id = azurerm_linux_web_app.webapp_a.id
       }
     } : {}

@@ -3,11 +3,11 @@ trigger: none
 variables:
   - template: config.yml
   - group: Terraform
-  - group: FinOps-Api-${{ variables.Ambiente }}-GVdasa
+  - group: FinOps-func-GVdasa
   - name: tfvars
-    value: '-var "aplicacao=$(NomeAplicacao)" -var "ambiente=$(Ambiente)" -var "webhookUrlTeams=$(webhookUrlTeams)"'
+    value: '-var "aplicacao=$(NomeAplicacao)" -var "setor=$(Setor)"'
   - name: workingDirectory
-    value: '$(System.DefaultWorkingDirectory)/pipelines/terraform'
+    value: '$(System.DefaultWorkingDirectory)/pipelines/terraform-function'
   - name: terraformVersion
     value: '1.9.3'
     
@@ -34,71 +34,66 @@ stages:
     - task: TerraformTaskV4@4
       displayName: "Terraform Init"
       inputs:
-        provider: "azurerm"
         command: "init"
-        commandOptions: "-upgrade"
-        workingDirectory: $(workingDirectory)
-        backendServiceArm: $(ServiceConnection)
-        backendAzureRmResourceGroupName: $(ResourceGroupName)
-        backendAzureRmStorageAccountName: $(StorageAccountName)
-        backendAzureRmContainerName: $(ContainerName)
-        backendAzureRmKey: "finops-$(Ambiente).tfstate"
+        backendType: azurerm
+        workingDirectory: '$(System.DefaultWorkingDirectory)/pipelines/terraform-function'
+        backendServiceArm: "$(ServiceConnection)"
+        backendAzureRmResourceGroupName: 'terraform-rg'
+        backendAzureRmStorageAccountName: "gvdasaterraformstate"
+        backendAzureRmContainerName: "nap"
+        backendAzureRmKey: "$(Setor)/$(NomeAplicacao).tfstate"
+        commandOptions: ' -backend-config="access_key=$(TerraformAccessKey)" '
 
     - task: TerraformTaskV4@4
       displayName: "Terraform Plan"
       inputs:
-        provider: "azurerm"
-        command: "plan"
-        commandOptions: "$(tfvars) -out=finops-$(Ambiente).tfplan"
-        workingDirectory: $(workingDirectory)
-        environmentServiceNameAzureRM: $(ServiceConnection)
+        command: 'plan'
+        provider: 'azurerm'
+        environmentServiceNameAzureRM: "$(ServiceConnection)"
+        workingDirectory: '$(System.DefaultWorkingDirectory)/pipelines/terraform-function'
+        publishPlanResults: "PlanResults"
+        commandOptions: '-input=false ${{ variables.tfvars }} -out=${{ variables.workingDirectory }}/terraform.tfplan -detailed-exitcode '
 
     - task: TerraformTaskV4@4
       displayName: "Terraform Apply"
       inputs:
-        provider: "azurerm"
-        command: "apply"
-        commandOptions: "finops-$(Ambiente).tfplan"
-        workingDirectory: $(workingDirectory)
-        environmentServiceNameAzureRM: $(ServiceConnection)
+        command: 'apply'
+        provider: 'azurerm'
+        environmentServiceNameAzureRM: "$(ServiceConnection)"
+        workingDirectory: '$(System.DefaultWorkingDirectory)/pipelines/terraform-function'
+        commandOptions: '-input=false ${{ variables.tfvars }}'
+        allowTelemetryCollection: true
 
-    - task: DownloadPipelineArtifact@2
-      displayName: "Download Function Artifact"
-      inputs:
-        buildType: 'specific'
-        project: 'FinOps-Platform'
-        definition: 'FinOps-Back-build-function'
-        buildVersionToDownload: 'latest'
-        artifactName: '${{ variables.ArtifactName }}'
-        targetPath: '$(System.ArtifactsDirectory)'
+    - download: FinOps-Back-build-function
+      displayName: 'Baixando artefatos do build da função'
+      artifact: ${{ variables.ArtifactName }} #Nome do artefato que foi publicado no build
 
-    - task: AzureFunctionApp@2
-      displayName: "Deploy Azure Function"
-      inputs:
-        connectedServiceNameARM: $(ServiceConnection)
-        appType: 'functionAppLinux'
-        appName: '$(NomeAplicacao)-$(Ambiente)-func'
-        package: '$(System.ArtifactsDirectory)/**/*.zip'
-        runtimeStack: 'DOTNET-ISOLATED|8.0'
-        deploymentMethod: 'zipDeploy'
+    - script: |
+        echo '-------- dir -------'
+        ls *
+        echo '-------- dir Workspace -------'
+        ls $(Pipeline.Workspace)/*
+        echo '-------- verify variable -------'
+        echo "Pipeline.Workspace: $(Pipeline.Workspace)"
+        echo "build.artifactstagingdirectory: $(build.artifactstagingdirectory)"
+        echo " ArtifactName: ${{ variables.ArtifactName }}"
+      displayName: 'Debug variables'
 
-    - task: AzureCLI@2
-      displayName: "Test Function Deployment"
+    - task: AzureFunctionApp@1
+      displayName: 'Publicando artefatos de build da função'
       inputs:
-        azureSubscription: $(ServiceConnection)
-        scriptType: 'bash'
-        scriptLocation: 'inlineScript'
-        inlineScript: |
-          # Get function key
-          FUNCTION_KEY=$(az functionapp keys list \
-            --name "$(NomeAplicacao)-$(Ambiente)-func" \
-            --resource-group "$(NomeAplicacao)-$(Ambiente)-rg" \
-            --query "functionKeys.default" -o tsv)
-          
-          # Test HTTP trigger with dry run
-          echo "Testing FinOps Function..."
-          curl -X GET "https://$(NomeAplicacao)-$(Ambiente)-func.azurewebsites.net/api/CostAnalysisHttpTrigger?code=$FUNCTION_KEY&dryRun=true" \
-            -H "Content-Type: application/json" \
-            --fail --show-error --silent
-          
-          echo "✅ FinOps Function deployed and responding correctly"
+        azureSubscription: '$(ServiceConnection)'
+        appType: 'functionApp'
+        appName: '$(NomeAplicacao)-${{ variables.Setor }}-func'
+        package: "$(Pipeline.Workspace)/FinOps-Back-build-function/${{ variables.ArtifactName }}/${{ variables.ArtifactName }}.zip"
+        appSettings: >-
+          -AZURE_SUBSCRIPTION_ID $(AZURE_SUBSCRIPTION_ID)
+          -CostAnalysisSchedule $(CostAnalysisSchedule)
+          -DailySummarySchedule $(DailySummarySchedule)
+          -EnableStorageAnalyzer $(EnableStorageAnalyzer)
+          -EnableVmAnalyzer $(EnableVmAnalyzer)
+          -EnableAppServiceAnalyzer $(EnableAppServiceAnalyzer)
+          -EnablePublicIpAnalyzer $(EnablePublicIpAnalyzer)
+          -EnableDiskAnalyzer $(EnableDiskAnalyzer)
+          -RESULTS_CONTAINER_NAME $(RESULTS_CONTAINER_NAME)
+          -APPLICATIONINSIGHTS_CONNECTION_STRING $(APPLICATIONINSIGHTS_CONNECTION_STRING)

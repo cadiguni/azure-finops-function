@@ -4,7 +4,7 @@
 resource "azurerm_service_plan" "finops" {
   name                = local.finops_settings.app_service_plan_name
   location            = local.localizacao
-  resource_group_name = local.ambiente == "prod" ? data.azurerm_resource_group.rg[0].name : azurerm_resource_group.rg[0].name
+  resource_group_name = azurerm_resource_group.rg.name
   os_type             = "Linux"
   sku_name            = "Y1"  # Consumption plan
   
@@ -15,7 +15,7 @@ resource "azurerm_service_plan" "finops" {
 resource "azurerm_linux_function_app" "finops" {
   name                       = local.finops_settings.function_app_name
   location                   = local.localizacao
-  resource_group_name        = local.ambiente == "prod" ? data.azurerm_resource_group.rg[0].name : azurerm_resource_group.rg[0].name
+  resource_group_name        = azurerm_resource_group.rg.name
   service_plan_id           = azurerm_service_plan.finops.id
   storage_account_name       = azurerm_storage_account.storage.name
   storage_account_access_key = azurerm_storage_account.storage.primary_access_key
