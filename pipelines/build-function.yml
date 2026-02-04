@@ -2,6 +2,7 @@ trigger: none
 
 variables:
   - template: config.yml
+  - group: FinOps-func-GVdasa
 
 pool: azp-gvdasa-be-01
 
