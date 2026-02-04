@@ -19,6 +19,14 @@ resource "azurerm_linux_function_app" "finops" {
   service_plan_id           = azurerm_service_plan.finops.id
   storage_account_name       = azurerm_storage_account.storage.name
   storage_account_access_key = azurerm_storage_account.storage.primary_access_key
+  
+  # Dependências explícitas para evitar problemas de criação
+  depends_on = [
+    azurerm_service_plan.finops,
+    azurerm_storage_account.storage,
+    azurerm_application_insights.cost_optimizer,
+    azurerm_user_assigned_identity.finops_identity
+  ]
 
   identity {
     type         = "UserAssigned"
@@ -26,55 +34,37 @@ resource "azurerm_linux_function_app" "finops" {
   }
 
   site_config {
+    # Configuração mínima e estável
+    always_on = false  # Consumption plan não suporta always_on = true
+    
     application_stack {
       dotnet_version              = "8.0"
       use_dotnet_isolated_runtime = true
     }
-    
-    application_insights_key               = azurerm_application_insights.cost_optimizer.instrumentation_key
-    application_insights_connection_string = azurerm_application_insights.cost_optimizer.connection_string
   }
 
-  app_settings = {
-    # Azure Configuration
-    "AZURE_CLIENT_ID"                    = azurerm_user_assigned_identity.finops_identity.client_id
-    "WEBSITE_RUN_FROM_PACKAGE"           = "1"
-    
-    # Application Insights
-    "APPINSIGHTS_INSTRUMENTATIONKEY"     = azurerm_application_insights.cost_optimizer.instrumentation_key
-    "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.cost_optimizer.connection_string
-    
-    # Storage Configuration
-    "AZURE_STORAGE_CONNECTION_STRING"    = azurerm_storage_account.storage.primary_connection_string
-    
-    # FinOps Configuration
-    "FinOps__SubscriptionId"             = data.azurerm_client_config.current.subscription_id
-    "FinOps__TenantId"                   = data.azurerm_client_config.current.tenant_id
-    "FinOps__StorageAccountName"         = azurerm_storage_account.storage.name
-    "FinOps__StorageContainerName"       = "analysis-results"
-    
-    # Scope Configuration - Centralizar escopo para produção
-    "FinOps__Scope__Mode"                = "ManagementGroup"
-    "FinOps__Scope__ManagementGroupId"   = "mg-gvdasa"
-    "FinOps__Scope__IncludeSubscriptions" = "[]"
-    "FinOps__Scope__ExcludeSubscriptions" = "[]"
-    
-    # Azure API Endpoints
-    "FinOps__CostManagementApiUrl"       = "https://management.azure.com"
-    "FinOps__ResourceGraphApiUrl"        = "https://management.azure.com/providers/Microsoft.ResourceGraph/resources"
-    "FinOps__MonitorApiUrl"              = "https://management.azure.com"
-    
-    # Analysis Configuration
-    "FinOps__VmCpuThreshold"             = "2.0"
-    "FinOps__VmMemoryThreshold"          = "10.0"
-    "FinOps__UnusedDiskDays"             = "7"
-    "FinOps__LowTrafficThreshold"        = "100"
-    "FinOps__SqlDtuThreshold"            = "20.0"
-    
-    # Notification Configuration (opcional)
-    "FinOps__NotificationEnabled"        = "false"
-    "FinOps__EmailRecipients"            = ""
-  }
+  app_settings = merge(
+    local.finops_settings.function_settings,
+    {
+      # Azure Configuration - Básico e necessário
+      "AZURE_CLIENT_ID"                    = azurerm_user_assigned_identity.finops_identity.client_id
+      "WEBSITE_RUN_FROM_PACKAGE"           = "1"
+      
+      # Application Insights
+      "APPINSIGHTS_INSTRUMENTATIONKEY"     = azurerm_application_insights.cost_optimizer.instrumentation_key
+      "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.cost_optimizer.connection_string
+      
+      # Storage Configuration
+      "AzureWebJobsStorage"                = azurerm_storage_account.storage.primary_connection_string
+      "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING" = azurerm_storage_account.storage.primary_connection_string
+      "WEBSITE_CONTENTSHARE"               = "finops-content"
+      
+      # FinOps Configuration - Essencial
+      "FinOps__SubscriptionId"             = data.azurerm_client_config.current.subscription_id
+      "FinOps__TenantId"                   = data.azurerm_client_config.current.tenant_id
+      "FinOps__StorageAccountName"         = azurerm_storage_account.storage.name
+    }
+  )
   
   tags = local.tags
 }
