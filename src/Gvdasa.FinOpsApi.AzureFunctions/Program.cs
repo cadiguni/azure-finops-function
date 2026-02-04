@@ -22,6 +22,7 @@ var host = new HostBuilder()
         services.AddScoped<UnusedPublicIpAnalyzer>();
         services.AddScoped<IdleVmAnalyzer>();
         services.AddScoped<AppServiceAnalyzer>();
+        services.AddScoped<DuplicateResourceAnalyzer>();
         services.AddScoped<CostAnalysisOrchestrator>();
         services.AddScoped<FinOpsResultAggregator>();
         services.AddScoped<DailySummaryService>();

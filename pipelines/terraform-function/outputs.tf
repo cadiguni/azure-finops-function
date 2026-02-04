@@ -1,27 +1,27 @@
 # Outputs principais do Terraform para Cost Optimizer
 output "function_app_name" {
   description = "Nome da Function App criada"
-  value       = azurerm_linux_function_app.cost_optimizer.name
+  value       = azurerm_linux_function_app.finops.name
 }
 
 output "function_app_url" {
   description = "URL da Function App"
-  value       = "https://${azurerm_linux_function_app.cost_optimizer.name}.azurewebsites.net"
+  value       = "https://${azurerm_linux_function_app.finops.name}.azurewebsites.net"
 }
 
 output "storage_account_name" {
   description = "Nome da Storage Account para resultados"
-  value       = azurerm_storage_account.cost_optimizer.name
+  value       = azurerm_storage_account.storage.name
 }
 
 output "managed_identity_principal_id" {
   description = "Principal ID da Managed Identity"
-  value       = azurerm_user_assigned_identity.cost_optimizer.principal_id
+  value       = azurerm_user_assigned_identity.finops_identity.principal_id
 }
 
 output "managed_identity_client_id" {
   description = "Client ID da Managed Identity"
-  value       = azurerm_user_assigned_identity.cost_optimizer.client_id
+  value       = azurerm_user_assigned_identity.finops_identity.client_id
 }
 
 output "application_insights_connection_string" {

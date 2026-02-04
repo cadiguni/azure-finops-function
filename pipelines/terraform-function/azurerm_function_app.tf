@@ -31,8 +31,8 @@ resource "azurerm_linux_function_app" "finops" {
       use_dotnet_isolated_runtime = true
     }
     
-    application_insights_key               = azurerm_application_insights.finops.instrumentation_key
-    application_insights_connection_string = azurerm_application_insights.finops.connection_string
+    application_insights_key               = azurerm_application_insights.cost_optimizer.instrumentation_key
+    application_insights_connection_string = azurerm_application_insights.cost_optimizer.connection_string
   }
 
   app_settings = {
@@ -41,8 +41,8 @@ resource "azurerm_linux_function_app" "finops" {
     "WEBSITE_RUN_FROM_PACKAGE"           = "1"
     
     # Application Insights
-    "APPINSIGHTS_INSTRUMENTATIONKEY"     = azurerm_application_insights.finops.instrumentation_key
-    "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.finops.connection_string
+    "APPINSIGHTS_INSTRUMENTATIONKEY"     = azurerm_application_insights.cost_optimizer.instrumentation_key
+    "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.cost_optimizer.connection_string
     
     # Storage Configuration
     "AZURE_STORAGE_CONNECTION_STRING"    = azurerm_storage_account.storage.primary_connection_string

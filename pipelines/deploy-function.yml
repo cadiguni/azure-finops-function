@@ -41,7 +41,7 @@ stages:
         backendAzureRmResourceGroupName: 'terraform-rg'
         backendAzureRmStorageAccountName: "gvdasaterraformstate"
         backendAzureRmContainerName: "nap"
-        backendAzureRmKey: "$(Setor)/$(NomeAplicacao).tfstate"
+        backendAzureRmKey: "finops/$(NomeAplicacao).tfstate"
         commandOptions: ' -backend-config="access_key=$(TerraformAccessKey)" '
 
     - task: TerraformTaskV4@4
