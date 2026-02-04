@@ -44,7 +44,7 @@ resource "azurerm_linux_function_app" "finops" {
     always_on = false  # Consumption plan não suporta always_on = true
     
     application_stack {
-      dotnet_version              = "8.0"
+      dotnet_version              = "6.0"
       use_dotnet_isolated_runtime = true
     }
   }
