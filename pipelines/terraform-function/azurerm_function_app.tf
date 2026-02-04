@@ -49,28 +49,26 @@ resource "azurerm_linux_function_app" "finops" {
     }
   }
 
-  app_settings = merge(
-    local.finops_settings.function_settings,
-    {
-      # Azure Configuration - Básico e necessário
-      "AZURE_CLIENT_ID"                    = azurerm_user_assigned_identity.finops_identity.client_id
-      "WEBSITE_RUN_FROM_PACKAGE"           = "1"
-      
-      # Application Insights
-      "APPINSIGHTS_INSTRUMENTATIONKEY"     = azurerm_application_insights.cost_optimizer.instrumentation_key
-      "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.cost_optimizer.connection_string
-      
-      # Storage Configuration
-      "AzureWebJobsStorage"                = azurerm_storage_account.storage.primary_connection_string
-      "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING" = azurerm_storage_account.storage.primary_connection_string
-      "WEBSITE_CONTENTSHARE"               = "finops-content"
-      
-      # FinOps Configuration - Essencial
-      "FinOps__SubscriptionId"             = data.azurerm_client_config.current.subscription_id
-      "FinOps__TenantId"                   = data.azurerm_client_config.current.tenant_id
-      "FinOps__StorageAccountName"         = azurerm_storage_account.storage.name
-    }
-  )
+  # Configuração mínima e estável para evitar erros 404
+  app_settings = {
+    # Runtime essencial
+    "FUNCTIONS_WORKER_RUNTIME"           = "dotnet-isolated"
+    "FUNCTIONS_EXTENSION_VERSION"        = "~4"
+    "WEBSITE_RUN_FROM_PACKAGE"           = "1"
+    "WEBSITE_USE_PLACEHOLDER_DOTNETISOLATED" = "1"
+    
+    # Storage obrigatório
+    "AzureWebJobsStorage"                = azurerm_storage_account.storage.primary_connection_string
+    "WEBSITE_CONTENTAZUREFILECONNECTIONSTRING" = azurerm_storage_account.storage.primary_connection_string
+    "WEBSITE_CONTENTSHARE"               = "finops-content"
+    
+    # Application Insights
+    "APPINSIGHTS_INSTRUMENTATIONKEY"     = azurerm_application_insights.cost_optimizer.instrumentation_key
+    "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.cost_optimizer.connection_string
+    
+    # Identity
+    "AZURE_CLIENT_ID"                    = azurerm_user_assigned_identity.finops_identity.client_id
+  }
   
   tags = local.tags
   
