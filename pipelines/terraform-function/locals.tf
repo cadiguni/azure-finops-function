@@ -23,14 +23,41 @@ locals {
       "FUNCTIONS_EXTENSION_VERSION"        = "~4"
       "WEBSITE_USE_PLACEHOLDER_DOTNETISOLATED" = "1"
       
-      # Configurações específicas do FinOps
+      # ⚠️ AJUSTE CRÍTICO: Azure Functions usa NCRONTAB (6 campos)
+      # Analysis Schedules - NCRONTAB format (seconds, minutes, hours, day, month, day-of-week)
+      "FinOps__Schedules__CostAnalysis" = "0 0 */4 * * *"     # A cada 4 horas (00:00, 04:00, 08:00, etc)
+      "FinOps__Schedules__DailySummary" = "0 0 6 * * *"       # Diário às 06:00 UTC
+      
+      # 🚀 CONTROLES DE PARALELISMO GLOBAL (Economia de custo)
+      "FinOps__Execution__MaxParallelSubscriptions" = "3"
+      "FinOps__Execution__MaxParallelAnalyzers" = "5"
+      "FinOps__Execution__MaxSubscriptionProcessingTime" = "00:20:00"
+      
+      # 💰 CONTROLE DE MÉTRICAS (Super importante para custo)
+      "FinOps__Analyzer__EnableMetricsDeepAnalysis" = "true"
+      
+      # 🎯 CONFIGURAÇÕES BÁSICAS DE ANÁLISE
       "FinOps__Analyzer__EnableVmAnalysis" = "true"
       "FinOps__Analyzer__EnableDiskAnalysis" = "true"
       "FinOps__Analyzer__EnableAppServiceAnalysis" = "true"
       "FinOps__Analyzer__EnableSqlAnalysis" = "true"
-      "FinOps__Analyzer__MinimumCostToAnalyze" = "50.0"
-      "FinOps__Analyzer__LowCpuThreshold" = "5.0"
+      
+      # 🔍 THRESHOLDS DINÂMICOS POR AMBIENTE
+      "FinOps__Thresholds__ProductionCpu" = "15"              # Produção usa threshold maior
+      "FinOps__Thresholds__DevCpu" = "5"                      # Dev usa threshold menor
+      "FinOps__Analyzer__LowCpuThreshold" = "5.0"             # Padrão (será sobrescrito por ambiente)
       "FinOps__Analyzer__DaysInactiveThreshold" = "7"
+      "FinOps__Analyzer__MinimumMonthlySavingsToRecommend" = "30"  # Dinâmico
+      
+      # 💎 MELHORIAS ENTERPRISE
+      # Caching de métricas (evita reprocessamento)
+      "FinOps__Caching__MetricsCacheHours" = "24"
+      
+      # Governança - Tags obrigatórias
+      "FinOps__Governance__RequiredTags" = jsonencode(["Responsavel", "Setor", "Ambiente"])
+      
+      # Classificação de ambiente com fallback
+      "FinOps__EnvironmentClassification__UseTagsFallback" = "true"
       
       # Management Groups
       "FinOps__EnvironmentClassification__ProductionManagementGroups" = jsonencode(["Setores"])
@@ -43,10 +70,6 @@ locals {
       "FinOps__Queue__MaxProcessingTime" = "00:30:00"
       "FinOps__Queue__MaxRetryAttempts" = "3"
       "FinOps__Queue__BatchSize" = "10"
-      
-      # Analysis Schedules - using NCRON expressions
-      "FinOps__Schedules__CostAnalysis" = "0 */4 * * *"     # Every 4 hours
-      "FinOps__Schedules__DailySummary" = "0 6 * * *"       # Daily at 6 AM
       
       # Output Configuration
       "FinOps__Storage__ResultsContainerName" = "finops-results"
