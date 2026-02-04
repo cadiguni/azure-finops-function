@@ -49,7 +49,7 @@ resource "azurerm_linux_function_app" "finops" {
     }
   }
 
-  # Configuração mínima e estável para evitar erros 404
+  # Configuração essencial - FinOps será configurado via Pipeline
   app_settings = {
     # Runtime essencial
     "FUNCTIONS_WORKER_RUNTIME"           = "dotnet-isolated"
@@ -66,8 +66,12 @@ resource "azurerm_linux_function_app" "finops" {
     "APPINSIGHTS_INSTRUMENTATIONKEY"     = azurerm_application_insights.cost_optimizer.instrumentation_key
     "APPLICATIONINSIGHTS_CONNECTION_STRING" = azurerm_application_insights.cost_optimizer.connection_string
     
-    # Identity
+    # Identity e configurações base
     "AZURE_CLIENT_ID"                    = azurerm_user_assigned_identity.finops_identity.client_id
+    "AZURE_SUBSCRIPTION_ID"             = data.azurerm_client_config.current.subscription_id
+    "FinOps__SubscriptionId"             = data.azurerm_client_config.current.subscription_id
+    "FinOps__TenantId"                   = data.azurerm_client_config.current.tenant_id
+    "FinOps__StorageAccountName"         = azurerm_storage_account.storage.name
   }
   
   tags = local.tags

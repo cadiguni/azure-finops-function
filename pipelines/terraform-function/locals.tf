@@ -72,7 +72,7 @@ locals {
       "FinOps__Queue__BatchSize" = "10"
       
       # Output Configuration
-      "FinOps__Storage__ResultsContainerName" = "finops-results"
+      "FinOps__Storage__ResultsContainerName" = "finops-analysis"
       "FinOps__Storage__ArchiveAfterDays" = "90"
     }
   }

@@ -96,13 +96,11 @@ stages:
         appName: '$(NomeAplicacao)-$(Setor)-func'
         package: "$(Pipeline.Workspace)/FinOps-Back-build-function/${{ variables.ArtifactName }}/${{ variables.ArtifactName }}.zip"
         appSettings: >-
-          -AZURE_SUBSCRIPTION_ID $(AZURE_SUBSCRIPTION_ID)
-          -CostAnalysisSchedule $(CostAnalysisSchedule)
-          -DailySummarySchedule $(DailySummarySchedule)
           -EnableStorageAnalyzer $(EnableStorageAnalyzer)
           -EnableVmAnalyzer $(EnableVmAnalyzer)
           -EnableAppServiceAnalyzer $(EnableAppServiceAnalyzer)
           -EnablePublicIpAnalyzer $(EnablePublicIpAnalyzer)
           -EnableDiskAnalyzer $(EnableDiskAnalyzer)
+          -CostAnalysisSchedule "$(CostAnalysisSchedule)"
+          -DailySummarySchedule "$(DailySummarySchedule)" 
           -RESULTS_CONTAINER_NAME $(RESULTS_CONTAINER_NAME)
-          -APPLICATIONINSIGHTS_CONNECTION_STRING $(APPLICATIONINSIGHTS_CONNECTION_STRING)
