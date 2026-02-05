@@ -86,17 +86,17 @@ Timer Function → Queue Storage → Parallel Queue Functions → Results
 O projeto agora usa **setor** em vez de múltiplos ambientes:
 
 ```yaml
-# config.yml - Simplificado para NAP
+# config.yml 
 variables:
-  Setor: 'nap'
+  Setor: ''
   NomeAplicacao: 'finops-api'
-  ArtifactName: 'FinOpsBuildFunction-nap'
+  ArtifactName: 'FinOpsBuildFunction-$(setor)'
 ```
 
 **Recursos criados:**
-- Function App: `finops-api-nap-func`
-- Resource Group: `finops-api-nap-rg`
-- Storage Account: `finopsapinapfuncstg`
+- Function App: `finops-api-$(setor)-func`
+- Resource Group: `finops-api-$(setor)-rg`
+- Storage Account: `$(setor)`
 
 ### 🔧 Configuração DEV vs PROD
 
@@ -167,7 +167,7 @@ variables:
     value: '-var "aplicacao=$(NomeAplicacao)" -var "setor=$(Setor)"'
 
 # Deploy usando terraform-function com backend state específico
-backendAzureRmKey: "nap/finops-api-function.tfstate"
+backendAzureRmKey: "$(setor)/finops-api-function.tfstate"
 ```
 
 ## ✅ Checklist de Deploy Produção
@@ -194,7 +194,7 @@ backendAzureRmKey: "nap/finops-api-function.tfstate"
 1. **Testar Function App**:
    ```bash
    # Health check endpoint
-   GET https://finops-api-nap-func.azurewebsites.net/api/SystemHealth
+   GET https://finops-api-$(setor)-func.azurewebsites.net/api/SystemHealth
    ```
 
 2. **Verificar Timer Triggers**:
@@ -230,7 +230,7 @@ backendAzureRmKey: "nap/finops-api-function.tfstate"
 - **Observability Service** - Métricas de negócio
 - **MetricsQueryClient Migration** - 3 analyzers com métricas reais
 - **Professional CRON** - Baseado em variáveis de ambiente
-- **Setor-Based Configuration** - NAP focused
+- **Setor-Based Configuration** - $(setor) focused
 
 ### 🚀 Performance Esperada
 - **10 subscriptions** = 10x mais rápido (paralelo)
@@ -243,4 +243,5 @@ backendAzureRmKey: "nap/finops-api-function.tfstate"
 **Versão**: 2.0-enterprise  
 **Última atualização**: Fevereiro 2026  
 **Mantido por**: Personal Portfolio Project  
+
 **Status**: ✅ Production Ready com arquitetura enterprise
