@@ -242,6 +242,7 @@ backendAzureRmKey: "$(setor)/finops-api-function.tfstate"
 
 **Versão**: 2.0-enterprise  
 **Última atualização**: Fevereiro 2026  
-**Mantido por**: Personal Portfolio Project  
+**Mantido por**: Lucas Lima Cadiguni  
 
 **Status**: ✅ Production Ready com arquitetura enterprise
+
