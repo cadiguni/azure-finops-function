@@ -1,13 +1,13 @@
-using FluentAssertions;
-using Gvdasa.FinOpsApi.Domain.Analyzers;
-using Gvdasa.FinOpsApi.Domain.Configuration;
-using Gvdasa.FinOpsApi.UnitTests.Fixtures;
+﻿using FluentAssertions;
+using Personal.FinOpsApi.Domain.Analyzers;
+using Personal.FinOpsApi.Domain.Configuration;
+using Personal.FinOpsApi.UnitTests.Fixtures;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
 
-namespace Gvdasa.FinOpsApi.UnitTests.Analyzers;
+namespace Personal.FinOpsApi.UnitTests.Analyzers;
 
 /// <summary>
 /// Testes para EnvironmentClassificationAnalyzer

@@ -1,11 +1,11 @@
-using FluentAssertions;
-using Gvdasa.FinOpsApi.Domain.Analyzers;
-using Gvdasa.FinOpsApi.UnitTests.Fixtures;
+﻿using FluentAssertions;
+using Personal.FinOpsApi.Domain.Analyzers;
+using Personal.FinOpsApi.UnitTests.Fixtures;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
-namespace Gvdasa.FinOpsApi.UnitTests.Analyzers;
+namespace Personal.FinOpsApi.UnitTests.Analyzers;
 
 /// <summary>
 /// Testes para AppServiceAnalyzer

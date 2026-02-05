@@ -1,6 +1,6 @@
 trigger: none
 
-pool: GVDASA-DOCKER-SB
+pool: PERSONAL-DOCKER-SB
 
 resources:
   repositories:

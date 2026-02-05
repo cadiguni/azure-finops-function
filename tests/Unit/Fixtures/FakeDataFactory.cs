@@ -1,6 +1,6 @@
-using Gvdasa.FinOpsApi.Modelos.FinOps;
+using Personal.FinOpsApi.Modelos.FinOps;
 
-namespace Gvdasa.FinOpsApi.UnitTests.Fixtures;
+namespace Personal.FinOpsApi.UnitTests.Fixtures;
 
 /// <summary>
 /// Factory para criação de dados fake para testes
@@ -32,7 +32,7 @@ public static class FakeDataFactory
                 Tags = new Dictionary<string, string>
                 {
                     ["environment"] = "dev",
-                    ["owner"] = "joao.silva@gvdasa.com.br",
+                    ["owner"] = "joao.silva@personal.com",
                     ["cost-center"] = "TI-Development"
                 }
             }
@@ -64,7 +64,7 @@ public static class FakeDataFactory
                 Tags = new Dictionary<string, string>
                 {
                     ["environment"] = "prod",
-                    ["owner"] = "admin@gvdasa.com.br",
+                    ["owner"] = "admin@personal.com",
                     ["cost-center"] = "Setores-Prod"
                 }
             }

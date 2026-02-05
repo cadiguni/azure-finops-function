@@ -26,7 +26,7 @@ resources:
       name: NAP/_git/OWASP-template
       ref: 'refs/heads/main'
 
-pool: GVDASA-DOCKER-SB
+pool: PERSONAL-DOCKER-SB
 
 stages:
   - template: ./templateOWASP-Back.yaml@OWASP

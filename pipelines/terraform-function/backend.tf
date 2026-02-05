@@ -1,7 +1,7 @@
 terraform {
   backend "azurerm" {
-    storage_account_name = "gvdasaterraformstate"
-    container_name       = "nap"
+    storage_account_name = "personalterraformstate"
+    container_name       = "personal"
   }
   required_providers {
     azurerm = {

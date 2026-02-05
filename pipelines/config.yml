@@ -1,2 +1,4 @@
 variables:
-  ArtifactName: 'FinOpsBuildFunction'
+  Setor: 'personal'
+  NomeAplicacao: 'finops-api'
+  ArtifactName: 'FinOpsBuildFunction-personal'

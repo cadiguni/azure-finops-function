@@ -2,9 +2,9 @@ trigger: none
 
 variables:
   - template: config.yml
-  - group: FinOps-func-GVdasa
+  - group: FinOps-func-Personal
 
-pool: azp-gvdasa-full-01
+pool: azp-personal-full-01
 
 stages:
   - stage: 'Build_function'
@@ -25,7 +25,7 @@ stages:
           vstsFeed: 'Feed_NAP'
           includeNuGetOrg: true
           projects: |
-            src/Gvdasa.FinOpsApi.AzureFunctions/Gvdasa.FinOpsApi.AzureFunctions.csproj
+            src/Personal.FinOpsApi.AzureFunctions/Personal.FinOpsApi.AzureFunctions.csproj
 
       - task: DotNetCoreCLI@2
         displayName: Build
@@ -35,7 +35,7 @@ stages:
           vstsFeed: 'Feed_NAP'
           includeNuGetOrg: true
           projects: |
-            src/Gvdasa.FinOpsApi.AzureFunctions/Gvdasa.FinOpsApi.AzureFunctions.csproj
+            src/Personal.FinOpsApi.AzureFunctions/Personal.FinOpsApi.AzureFunctions.csproj
 
       - task: DotNetCoreCLI@2
         displayName: Publish
@@ -43,7 +43,7 @@ stages:
           command: publish
           publishWebProjects: false
           modifyOutputPath: true
-          arguments: ' src/Gvdasa.FinOpsApi.AzureFunctions/Gvdasa.FinOpsApi.AzureFunctions.csproj --configuration Release --output $(build.artifactstagingdirectory)/${{ variables.ArtifactName }}'
+          arguments: ' src/Personal.FinOpsApi.AzureFunctions/Personal.FinOpsApi.AzureFunctions.csproj --configuration Release --output $(build.artifactstagingdirectory)/${{ variables.ArtifactName }}'
           zipAfterPublish: True
 
       - script: |

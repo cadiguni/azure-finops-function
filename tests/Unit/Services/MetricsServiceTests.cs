@@ -1,6 +1,6 @@
 using FluentAssertions;
-using Gvdasa.FinOpsApi.Infra.Services;
-using Gvdasa.FinOpsApi.Modelos;
+using Personal.FinOpsApi.Infra.Services;
+using Personal.FinOpsApi.Modelos;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Moq.Protected;
@@ -8,7 +8,7 @@ using System.Net;
 using System.Text.Json;
 using Xunit;
 
-namespace Gvdasa.FinOpsApi.UnitTests.Services;
+namespace Personal.FinOpsApi.UnitTests.Services;
 
 /// <summary>
 /// Testes para MetricsService com mocks do HttpClient

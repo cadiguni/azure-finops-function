@@ -1,6 +1,18 @@
 # Azure FinOps Platform 🏗️💰
 
-Plataforma empresarial de análise de custos e otimização para recursos Azure com **arquitetura queue-based** para alta performance e escala.
+**Plataforma Azure Functions para análise de custos e otimização de recursos Azure com arquitetura queue-based para alta performance e escala.**
+
+> **Nota**: Este é um projeto pessoal desenvolvido para demonstrar conhecimentos em arquitetura Azure, Azure Functions, .NET, e práticas de FinOps. Todas as referências corporativas foram removidas para uso como portfolio.
+
+## 🎯 **Projeto Focado em Azure Functions**
+
+Este projeto foi otimizado para conter **apenas** os componentes essenciais:
+- ✅ **Azure Functions** - Processamento serverless de análises FinOps
+- ✅ **Analyzers** - Lógica de análise de recursos Azure
+- ✅ **Queue Processing** - Arquitetura assíncrona e escalável  
+- ✅ **Testes Unitários** - Coverage completo dos analyzers
+- ✅ **Terraform** - IaC para deployment
+- ✅ **Pipelines** - CI/CD automatizado
 
 ## 📊 Status do Projeto
 
@@ -144,13 +156,13 @@ services.AddSingleton<MetricsQueryClient>(); // Para métricas reais
     command: publish
     modifyOutputPath: true
     zipAfterPublish: True
-    arguments: 'src/Gvdasa.FinOpsApi.AzureFunctions/Gvdasa.FinOpsApi.AzureFunctions.csproj'
+    arguments: 'src/Personal.FinOpsApi.AzureFunctions/Personal.FinOpsApi.AzureFunctions.csproj'
 ```
 
 ### 🔄 Deploy Pipeline
 ```yaml
 variables:
-  - group: FinOps-func-GVdasa  # Variable group específico do setor
+  - group: FinOps-func-Personal  # Variable group específico do setor
   - name: tfvars
     value: '-var "aplicacao=$(NomeAplicacao)" -var "setor=$(Setor)"'
 
@@ -162,7 +174,7 @@ backendAzureRmKey: "nap/finops-api-function.tfstate"
 
 ### 🔧 ANTES DO DEPLOY - Azure Portal
 
-1. **Criar Variable Group** `FinOps-func-GVdasa`:
+1. **Criar Variable Group** `FinOps-func-Personal`:
    ```
    ServiceConnection = <service-connection>
    TerraformAccessKey = <terraform-state-key>
@@ -173,9 +185,9 @@ backendAzureRmKey: "nap/finops-api-function.tfstate"
 
 2. **Configurar Terraform Backend**:
    - Resource Group: `terraform-rg`
-   - Storage Account: `gvdasaterraformstate`
+   - Storage Account: `personalterraformstate`
    - Container: `servicosbase`
-   - Key: `nap/finops-api-function.tfstate`
+   - Key: `personal/finops-api-function.tfstate`
 
 ### 🎯 APÓS DEPLOY - Verificações
 
@@ -230,5 +242,5 @@ backendAzureRmKey: "nap/finops-api-function.tfstate"
 
 **Versão**: 2.0-enterprise  
 **Última atualização**: Fevereiro 2026  
-**Mantido por**: Equipe DevOps GVDASA - Setor NAP  
+**Mantido por**: Personal Portfolio Project  
 **Status**: ✅ Production Ready com arquitetura enterprise

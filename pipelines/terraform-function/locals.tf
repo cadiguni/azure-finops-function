@@ -1,8 +1,8 @@
 locals {
-  dominio = "gvdasa.com.br"
+  dominio = "personal.com"
   tags = {
-    Responsável = "lcadiguni@gvdasa.com.br"
-    Setor = "NAP"
+    Responsável = "personal@personal.com"
+    Setor = "Personal"
   }
 
   localizacao = "East US 2"

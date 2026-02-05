@@ -1,12 +1,12 @@
 using FluentAssertions;
-using Gvdasa.FinOpsApi.Domain.Services;
-using Gvdasa.FinOpsApi.Domain.Analyzers;
-using Gvdasa.FinOpsApi.UnitTests.Fixtures;
+using Personal.FinOpsApi.Domain.Services;
+using Personal.FinOpsApi.Domain.Analyzers;
+using Personal.FinOpsApi.UnitTests.Fixtures;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
 
-namespace Gvdasa.FinOpsApi.UnitTests.Services;
+namespace Personal.FinOpsApi.UnitTests.Services;
 
 /// <summary>
 /// Testes de integração para OrchestrationService
