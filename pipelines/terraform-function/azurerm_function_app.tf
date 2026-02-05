@@ -45,17 +45,16 @@ resource "azurerm_linux_function_app" "finops" {
     
     application_stack {
       dotnet_version              = "6.0"
-      use_dotnet_isolated_runtime = true
+      use_dotnet_isolated_runtime = false  # In-process = funciona com func start
     }
   }
 
   # Configuração essencial - FinOps será configurado via Pipeline
   app_settings = {
-    # Runtime essencial
-    "FUNCTIONS_WORKER_RUNTIME"           = "dotnet-isolated"
+    # Runtime essencial - IN-PROCESS
+    "FUNCTIONS_WORKER_RUNTIME"           = "dotnet"
     "FUNCTIONS_EXTENSION_VERSION"        = "~4"
     "WEBSITE_RUN_FROM_PACKAGE"           = "1"
-    "WEBSITE_USE_PLACEHOLDER_DOTNETISOLATED" = "1"
     
     # Storage obrigatório
     "AzureWebJobsStorage"                = azurerm_storage_account.storage.primary_connection_string

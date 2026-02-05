@@ -25,7 +25,7 @@ locals {
       
       # ⚠️ AJUSTE CRÍTICO: Azure Functions usa NCRONTAB (6 campos)
       # Analysis Schedules - NCRONTAB format (seconds, minutes, hours, day, month, day-of-week)
-      "FinOps__Schedules__CostAnalysis" = "0 0 */4 * * *"     # A cada 4 horas (00:00, 04:00, 08:00, etc)
+      "FinOps__Schedules__CostAnalysis" = "0 */5 * * * *"     # A cada 5 minutos para teste
       "FinOps__Schedules__DailySummary" = "0 0 6 * * *"       # Diário às 06:00 UTC
       
       # 🚀 CONTROLES DE PARALELISMO GLOBAL (Economia de custo)
