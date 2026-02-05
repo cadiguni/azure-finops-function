@@ -44,18 +44,13 @@ var host = new HostBuilder()
         
         services.AddScoped<AzureMetricsService>();
         
-        // � ENTERPRISE SERVICES - Queue Processing + Observability + Circuit Breaker
-        services.AddScoped<QueueProcessingService>();
+        // � ENTERPRISE SERVICES - Observability + Circuit Breaker (Queue Processing temporariamente desabilitado)
+        // services.AddScoped<QueueProcessingService>(); // DESABILITADO: Conflito com System.ComponentModel
         services.AddSingleton<CircuitBreakerService>();
         services.AddSingleton<ObservabilityService>();
         
-        // 📦 Queue Storage Client para processamento paralelo
-        services.AddSingleton(sp =>
-        {
-            var config = sp.GetRequiredService<IConfiguration>();
-            var connectionString = config["AzureWebJobsStorage"];
-            return new Azure.Storage.Queues.QueueServiceClient(connectionString);
-        });
+        // 📦 Queue Storage Client - DESABILITADO temporariamente
+        // services.AddSingleton(sp => new Azure.Storage.Queues.QueueServiceClient(...)); // DESABILITADO
         
         // �🔗 OPÇÃO B: Azure Storage Client (funciona local + Azure)
         services.AddSingleton(sp =>

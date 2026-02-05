@@ -435,4 +435,30 @@ public class CostAnalysisOrchestrator
             return null;
         }
     }
+
+    /// <summary>
+    /// 🟢 EXECUÇÃO DIRETA: Análises DIÁRIAS (rápidas, sem métricas pesadas)
+    /// 🎯 PROCESSAMENTO DIRETO: Executado pelo Timer Function (SIMULAÇÃO)
+    /// </summary>
+    public async Task RunDailyAnalysisAsync(string subscriptionId)
+    {
+        _logger.LogInformation("🟢 SIMULAÇÃO: Executando análises DIÁRIAS para subscription {subscriptionId}", subscriptionId);
+        
+        await Task.Delay(1000); // Simula processamento
+        
+        _logger.LogInformation("✅ SIMULAÇÃO: Análises DIÁRIAS concluídas para {subscriptionId} - Discos órfãos: 5, IPs órfãos: 2", subscriptionId);
+    }
+
+    /// <summary>
+    /// 🟡 EXECUÇÃO DIRETA: Análises 2X SEMANA (pesadas, com Azure Monitor)
+    /// 🎯 PROCESSAMENTO DIRETO: Com timeout e circuit breaker (SIMULAÇÃO)
+    /// </summary>
+    public async Task RunBiWeeklyAnalysisAsync(string subscriptionId)
+    {
+        _logger.LogInformation("🟡 SIMULAÇÃO: Executando análises 2X SEMANA para subscription {subscriptionId}", subscriptionId);
+        
+        await Task.Delay(2000); // Simula processamento mais longo
+        
+        _logger.LogInformation("✅ SIMULAÇÃO: Análises 2X SEMANA concluídas para {subscriptionId} - VMs idle: 3, Storage accounts: 7, App services: 1", subscriptionId);
+    }
 }

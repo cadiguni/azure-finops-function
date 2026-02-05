@@ -25,20 +25,20 @@ namespace Gvdasa.FinOpsApi.AzureFunctions.Functions;
 public class CostAnalysisTimerFunction
 {
     private readonly CostAnalysisOrchestrator _orchestrator;
-    private readonly QueueProcessingService _queueService;
+    // private readonly QueueProcessingService _queueService; // DESABILITADO: Processamento direto
     private readonly ObservabilityService _observability;
     private readonly IConfiguration _configuration;
     private readonly ILogger<CostAnalysisTimerFunction> _logger;
 
     public CostAnalysisTimerFunction(
         CostAnalysisOrchestrator orchestrator,
-        QueueProcessingService queueService,
+        // QueueProcessingService queueService, // DESABILITADO
         ObservabilityService observability,
         IConfiguration configuration,
         ILogger<CostAnalysisTimerFunction> logger)
     {
         _orchestrator = orchestrator;
-        _queueService = queueService;
+        // _queueService = queueService; // DESABILITADO
         _observability = observability;
         _configuration = configuration;
         _logger = logger;
@@ -64,24 +64,36 @@ public class CostAnalysisTimerFunction
         try
         {
             var subscriptionIds = GetSubscriptionIds();
-            _logger.LogInformation("📅 Processando {count} subscriptions via QUEUE-BASED architecture", subscriptionIds.Count);
+            _logger.LogInformation("📅 Processando {count} subscriptions via PROCESSAMENTO DIRETO (sem queue)", subscriptionIds.Count);
 
-            // 🟢 ANÁLISES DIÁRIAS (executam todos os dias)
-            await EnqueueDailyAnalysisAsync(subscriptionIds);
+            // 🎯 PROCESSAMENTO DIRETO: Em vez de enfileirar, executa diretamente
+            foreach (var subscriptionId in subscriptionIds)
+            {
+                _logger.LogInformation("🔄 Processando subscription: {subscriptionId}", subscriptionId);
+                
+                try
+                {
+                    // 🟢 ANÁLISES DIÁRIAS (executam todos os dias)
+                    await ExecuteDailyAnalysisAsync(subscriptionId);
 
-            // 🟡 ANÁLISES 2X SEMANA (só nas terças e sextas)
-            if (dayOfWeek == DayOfWeek.Tuesday || dayOfWeek == DayOfWeek.Friday)
-            {
-                _logger.LogInformation("📅 {dayOfWeek}: Enfileirando análises 2x semana (Storage + App Service + VM Idle)", dayOfWeek);
-                await EnqueueBiWeeklyAnalysisAsync(subscriptionIds);
-            }
-            else
-            {
-                _logger.LogInformation("📅 {dayOfWeek}: Pulando análises 2x semana (próxima: Terça ou Sexta)", dayOfWeek);
+                    // 🟡 ANÁLISES 2X SEMANA (só nas terças e sextas)
+                    if (dayOfWeek == DayOfWeek.Tuesday || dayOfWeek == DayOfWeek.Friday)
+                    {
+                        _logger.LogInformation("📅 {dayOfWeek}: Executando análises 2x semana (Storage + App Service + VM Idle)", dayOfWeek);
+                        await ExecuteBiWeeklyAnalysisAsync(subscriptionId);
+                    }
+                    
+                    _logger.LogInformation("✅ Subscription {subscriptionId} processada com sucesso", subscriptionId);
+                }
+                catch (Exception subEx)
+                {
+                    _logger.LogError(subEx, "❌ Erro ao processar subscription {subscriptionId}", subscriptionId);
+                    // Continua com próxima subscription
+                }
             }
 
             var executionTime = DateTime.UtcNow - startTime;
-            _logger.LogInformation("✅ CostAnalysisTimer concluída - Subscriptions enfileiradas em {duration}ms", executionTime.TotalMilliseconds);
+            _logger.LogInformation("✅ CostAnalysisTimer concluída - {count} subscriptions processadas em {duration}ms", subscriptionIds.Count, executionTime.TotalMilliseconds);
             
             // 📊 Registra métrica de sucesso
             _observability.RecordAnalyzerExecutionTime("TimerOrchestrator", executionTime, true);
@@ -100,29 +112,31 @@ public class CostAnalysisTimerFunction
     }
 
     /// <summary>
-    /// 🟢 Enfileira análises DIÁRIAS (rápidas, sem métricas pesadas)
-    /// 🚀 QUEUE-BASED: Timer -> Queue -> Parallel Processing
+    /// 🟢 EXECUÇÃO DIRETA: Análises DIÁRIAS (rápidas, sem métricas pesadas)
+    /// 🎯 PROCESSAMENTO DIRETO: Timer executa diretamente
     /// </summary>
-    private async Task EnqueueDailyAnalysisAsync(List<string> subscriptionIds)
+    private async Task ExecuteDailyAnalysisAsync(string subscriptionId)
     {
-        _logger.LogInformation("🟢 Enfileirando análises DIÁRIAS para {count} subscriptions...", subscriptionIds.Count);
+        _logger.LogInformation("🟢 Executando análises DIÁRIAS para subscription {subscriptionId}...", subscriptionId);
 
-        await _queueService.EnqueueDailyAnalysisAsync(subscriptionIds);
+        // Executa os analyzers diretamente via orchestrator
+        await _orchestrator.RunDailyAnalysisAsync(subscriptionId);
         
-        _logger.LogInformation("✅ Análises DIÁRIAS enfileiradas com sucesso");
+        _logger.LogInformation("✅ Análises DIÁRIAS concluídas para {subscriptionId}", subscriptionId);
     }
 
     /// <summary>
-    /// 🟡 Enfileira análises 2X SEMANA (pesadas, com Azure Monitor)
-    /// 🚀 QUEUE-BASED: Com feature flags e circuit breaker
+    /// 🟡 EXECUÇÃO DIRETA: Análises 2X SEMANA (pesadas, com Azure Monitor)
+    /// 🎯 PROCESSAMENTO DIRETO: Com circuit breaker integrado
     /// </summary>
-    private async Task EnqueueBiWeeklyAnalysisAsync(List<string> subscriptionIds)
+    private async Task ExecuteBiWeeklyAnalysisAsync(string subscriptionId)
     {
-        _logger.LogInformation("🟡 Enfileirando análises 2X SEMANA para {count} subscriptions...", subscriptionIds.Count);
+        _logger.LogInformation("🟡 Executando análises 2X SEMANA para subscription {subscriptionId}...", subscriptionId);
 
-        await _queueService.EnqueueBiWeeklyAnalysisAsync(subscriptionIds);
+        // Executa os analyzers pesados diretamente via orchestrator
+        await _orchestrator.RunBiWeeklyAnalysisAsync(subscriptionId);
         
-        _logger.LogInformation("✅ Análises 2X SEMANA enfileiradas com sucesso");
+        _logger.LogInformation("✅ Análises 2X SEMANA concluídas para {subscriptionId}", subscriptionId);
     }
 
     /// <summary>

@@ -1,7 +1,6 @@
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
-using Gvdasa.FinOpsApi.AzureFunctions.Services;
 using System.Net;
 
 namespace Gvdasa.FinOpsApi.AzureFunctions.Functions
@@ -9,12 +8,10 @@ namespace Gvdasa.FinOpsApi.AzureFunctions.Functions
     public class ManualTestFunction
     {
         private readonly ILogger<ManualTestFunction> _logger;
-        private readonly QueueProcessingService _queueService;
 
-        public ManualTestFunction(ILogger<ManualTestFunction> logger, QueueProcessingService queueService)
+        public ManualTestFunction(ILogger<ManualTestFunction> logger)
         {
             _logger = logger;
-            _queueService = queueService;
         }
 
         /// <summary>
@@ -25,21 +22,16 @@ namespace Gvdasa.FinOpsApi.AzureFunctions.Functions
         public async Task<HttpResponseData> RunCostAnalysis(
             [HttpTrigger(AuthorizationLevel.Function, "post", "get")] HttpRequestData req)
         {
-            _logger.LogInformation("🧪 TESTE MANUAL: Iniciando análise de custo via HTTP trigger");
+            _logger.LogInformation("🧪 TESTE MANUAL: Análise de custo via HTTP - SIMULADO (sem queue)");
 
             try
             {
-                // Envia mensagem para a fila de análise - mesmo que o timer
-                var subscriptionId = Environment.GetEnvironmentVariable("FinOps__SubscriptionId") ?? "";
-                await _queueService.EnqueueSubscriptionAnalysisAsync(
-                    new List<string> { subscriptionId }, 
-                    "cost"
-                );
-
-                var response = req.CreateResponse(HttpStatusCode.OK);
-                await response.WriteStringAsync("✅ Análise de custo iniciada com sucesso! Verifique os logs e o storage em ~2-3 minutos.");
+                // SIMULAÇÃO: Em vez de enfileirar, apenas simula a análise
+                _logger.LogInformation("✅ SIMULAÇÃO: Análise de custo iniciada (sem processamento real)");
                 
-                _logger.LogInformation("✅ TESTE MANUAL: Análise enfileirada com sucesso");
+                var response = req.CreateResponse(HttpStatusCode.OK);
+                await response.WriteStringAsync("✅ Teste manual executado! (Simulação - queues desabilitadas temporariamente)");
+                
                 return response;
             }
             catch (Exception ex)
