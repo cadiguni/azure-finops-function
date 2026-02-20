@@ -1,4 +1,4 @@
-﻿namespace Personal.FinOpsApi.AzureFunctions.Models;
+namespace Personal.FinOpsApi.AzureFunctions.Models;
 
 public class CostAnalysisResult
 {
@@ -69,6 +69,16 @@ public class CostRecommendation
     public decimal EstimatedMonthlySavings { get; set; }
     
     /// <summary>
+    /// Moeda (BRL, USD, etc.)
+    /// </summary>
+    public string Currency { get; set; } = "BRL";
+    
+    /// <summary>
+    /// Nível de confiança na recomendação (0.0 a 1.0)
+    /// </summary>
+    public decimal Confidence { get; set; }
+    
+    /// <summary>
     /// Economia mensal potencial (USD) - mesmo que EstimatedMonthlySavings
     /// </summary>
     public decimal PotentialMonthlySavings
@@ -111,6 +121,11 @@ public class CostRecommendation
     /// Tags do recurso
     /// </summary>
     public Dictionary<string, string> Tags { get; set; } = new();
+    
+    /// <summary>
+    /// Metadados adicionais da análise
+    /// </summary>
+    public Dictionary<string, object> Metadata { get; set; } = new();
 }
 
 public class CostAnalysisSummary

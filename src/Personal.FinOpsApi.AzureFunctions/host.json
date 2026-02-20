@@ -13,12 +13,27 @@
             "Microsoft.Azure.Functions.Worker": "Information"
         }
     },
-    "functionTimeout": "00:10:00",
+    "functionTimeout": "00:08:00",
     "extensions": {
+        "serviceBus": {
+            "prefetchCount": 0,
+            "messageHandlerOptions": {
+                "maxConcurrentCalls": 1,
+                "autoComplete": false,
+                "maxAutoRenewDuration": "00:05:00"
+            },
+            "retryOptions": {
+                "mode": "exponential",
+                "tryTimeout": "00:01:00",
+                "delay": "00:00:01",
+                "maxDelay": "00:01:00",
+                "maxRetries": 3
+            }
+        },
         "http": {
             "routePrefix": "api",
-            "maxOutstandingRequests": 200,
-            "maxConcurrentRequests": 100,
+            "maxOutstandingRequests": 50,
+            "maxConcurrentRequests": 10,
             "dynamicThrottlesEnabled": true
         }
     }

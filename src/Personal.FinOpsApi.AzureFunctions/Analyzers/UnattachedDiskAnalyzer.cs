@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using Azure.Identity;
 using Microsoft.Extensions.Logging;
 using Personal.FinOpsApi.AzureFunctions.Models;
@@ -10,12 +10,14 @@ public class UnattachedDiskAnalyzer
 {
     private readonly HttpClient _httpClient;
     private readonly DefaultAzureCredential _credential;
+    private readonly HttpRetryService _httpRetryService;
     private readonly ILogger<UnattachedDiskAnalyzer> _logger;
 
-    public UnattachedDiskAnalyzer(HttpClient httpClient, ILogger<UnattachedDiskAnalyzer> logger)
+    public UnattachedDiskAnalyzer(HttpClient httpClient, HttpRetryService httpRetryService, ILogger<UnattachedDiskAnalyzer> logger)
     {
         _httpClient = httpClient;
         _credential = new DefaultAzureCredential();
+        _httpRetryService = httpRetryService;
         _logger = logger;
     }
 
@@ -65,9 +67,16 @@ public class UnattachedDiskAnalyzer
             _httpClient.DefaultRequestHeaders.Clear();
             _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {token.Token}");
 
-            var response = await _httpClient.PostAsync(
+            var response = await _httpRetryService.PostWithRetryAsync(
+                _httpClient,
                 "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01",
                 content);
+
+            if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+            {
+                _logger.LogWarning("⚠️ Resource Graph API rate-limited - pulando análise de discos");
+                return new StandardAnalyzerResult();
+            }
 
             response.EnsureSuccessStatusCode();
             var jsonResponse = await response.Content.ReadAsStringAsync();

@@ -1,4 +1,4 @@
-﻿namespace Personal.FinOpsApi.AzureFunctions.Services;
+namespace Personal.FinOpsApi.AzureFunctions.Services;
 
 /// <summary>
 /// 🎯 CENTRALIZADOR DE PATHS - FASE B ATUALIZADA
@@ -11,7 +11,7 @@ public static class BlobPathBuilder
 {
     /// <summary>
     /// Gera path para análises (raw + recommendations)
-    /// Padrão: analyses/year=YYYY/month=MM/day=DD/subscription=XXXX/arquivo.json
+    /// Padrão: analyses/year=YYYY/month=MM/day=DD/XXXX/arquivo.json
     /// </summary>
     public static string BuildAnalysisPath(
         DateTime date,
@@ -21,13 +21,13 @@ public static class BlobPathBuilder
         return $"analyses/year={date:yyyy}/" +
                $"month={date:MM}/" +
                $"day={date:dd}/" +
-               $"subscription={subscriptionId}/" +
+               $"{subscriptionId}/" +
                fileName;
     }
 
     /// <summary>
     /// Gera path para summaries
-    /// Padrão: summaries/year=YYYY/month=MM/day=DD/subscription=XXXX/arquivo.json
+    /// Padrão: summaries/year=YYYY/month=MM/day=DD/XXXX/arquivo.json
     /// </summary>
     public static string BuildSummaryPath(
         DateTime date,
@@ -37,7 +37,7 @@ public static class BlobPathBuilder
         return $"summaries/year={date:yyyy}/" +
                $"month={date:MM}/" +
                $"day={date:dd}/" +
-               $"subscription={subscriptionId}/" +
+               $"{subscriptionId}/" +
                fileName;
     }
 

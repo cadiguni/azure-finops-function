@@ -1,4 +1,4 @@
-﻿using Personal.FinOpsApi.AzureFunctions.Services;
+using Personal.FinOpsApi.AzureFunctions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Logging;
@@ -81,23 +81,46 @@ public class DailySummaryFunction
     /// </summary>
     [Function("ManualDailySummary")]
     public async Task<object> RunManualAsync(
-        [HttpTrigger("get", "post")] HttpRequestData req,
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", "post")] HttpRequestData req,
         FunctionContext context)
     {
         _logger.LogInformation("🔧 ManualDailySummary executada via HTTP");
 
         try
         {
-            // Pegar data da query string ou usar hoje
-            var dateStr = req.Query["date"] ?? DateTime.UtcNow.ToString("yyyy-MM-dd");
+            _logger.LogInformation("🐛 1. Verificando req.Query...");
+            
+            // Pegar data da query string ou usar hoje - com proteção null
+            string dateStr;
+            try 
+            {
+                dateStr = req.Query?["date"] ?? DateTime.UtcNow.ToString("yyyy-MM-dd");
+                _logger.LogInformation("🐛 2. Data extraída: {date}", dateStr);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Erro ao extrair data da query string");
+                dateStr = DateTime.UtcNow.ToString("yyyy-MM-dd");
+                _logger.LogInformation("🐛 2b. Usando data padrão: {date}", dateStr);
+            }
             
             _logger.LogInformation("📅 Processando data: {date} (manual)", dateStr);
             
+            _logger.LogInformation("🐛 3. Verificando _summaryService...");
+            if (_summaryService == null)
+            {
+                _logger.LogError("❌ _summaryService é NULL!");
+                throw new InvalidOperationException("DailySummaryService não foi injetado corretamente");
+            }
+            
+            _logger.LogInformation("🐛 4. Chamando ProcessDayAsync...");
             var summary = await _summaryService.ProcessDayAsync(dateStr);
             
+            _logger.LogInformation("🐛 5. Criando response...");
             var response = req.CreateResponse(System.Net.HttpStatusCode.OK);
             await response.WriteAsJsonAsync(summary);
             
+            _logger.LogInformation("✅ ManualDailySummary executado com sucesso");
             return response;
         }
         catch (Exception ex)

@@ -1,4 +1,4 @@
-﻿using Azure.Storage.Blobs;
+using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Configuration;
@@ -9,7 +9,7 @@ namespace Personal.FinOpsApi.AzureFunctions.Services;
 
 /// <summary>
 /// 🗄️ FASE B - Padronização completa para Blob Storage
-/// Padrão único: year=YYYY/month=MM/day=DD/subscription=XXXX/arquivo.json
+/// Padrão único: year=YYYY/month=MM/day=DD/XXXX/arquivo.json
 /// </summary>
 public class AnalysisStorageService
 {
@@ -50,7 +50,7 @@ public class AnalysisStorageService
 
     /// <summary>
     /// 🎯 FASE B - Método principal padronizado
-    /// Salva apenas RECOMENDAÇÕES LIMPAS em: analyses/year=YYYY/month=MM/day=DD/subscription=XXXX/recommendations.json
+    /// Salva apenas RECOMENDAÇÕES LIMPAS em: analyses/year=YYYY/month=MM/day=DD/XXXX/recommendations.json
     /// </summary>
     public async Task SaveAsync(
         string subscriptionId, 
@@ -59,6 +59,7 @@ public class AnalysisStorageService
     {
         try
         {
+            // 💾 1. SALVAR RECOMMENDATIONS (processadas)
             var blobPath = BlobPathBuilder.BuildAnalysisPath(
                 analysisDateUtc,
                 subscriptionId,
@@ -74,8 +75,10 @@ public class AnalysisStorageService
             using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json));
 
             await blobClient.UploadAsync(stream, overwrite: true);
-
             _logger.LogInformation("💾 Recomendações limpas salvas: {path}", blobPath);
+
+            // 🗜 2. SALVAR RAW DATA (para debug/auditoria)
+            await SaveRawAsync(subscriptionId, analysisResult, analysisDateUtc);
         }
         catch (Exception ex)
         {
@@ -85,8 +88,35 @@ public class AnalysisStorageService
     }
 
     /// <summary>
+    /// 🗜 DADOS RAW - Salva dados brutos para debug/auditoria
+    /// Caminho: raw-analysis/year=YYYY/month=MM/day=DD/XXXX/raw-findings.json
+    /// </summary>
+    public async Task SaveRawAsync(
+        string subscriptionId, 
+        object analysisResult, 
+        DateTime analysisDateUtc)
+    {
+        try
+        {
+            var rawBlobPath = $"raw-analysis/year={analysisDateUtc:yyyy}/month={analysisDateUtc:MM}/day={analysisDateUtc:dd}/{subscriptionId}/raw-findings.json";
+            var rawBlobClient = _container.GetBlobClient(rawBlobPath);
+
+            // Salvar dados brutos completos (sem processamento)
+            var rawJson = JsonSerializer.Serialize(analysisResult, _jsonOptions);
+            using var rawStream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(rawJson));
+
+            await rawBlobClient.UploadAsync(rawStream, overwrite: true);
+            _logger.LogInformation("🗜 Dados RAW salvos: {path}", rawBlobPath);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("⚠️ Erro ao salvar RAW: {error}", ex.Message);
+        }
+    }
+
+    /// <summary>
     /// 📋 Lista todas as subscriptions analisadas em uma data específica
-    /// Busca por padrão: analyses/year=YYYY/month=MM/day=DD/subscription=*/
+    /// Busca por padrão: analyses/year=YYYY/month=MM/day=DD/*/
     /// </summary>
     public async Task<List<string>> ListSubscriptionsByDateAsync(DateTime date)
     {
@@ -97,13 +127,12 @@ public class AnalysisStorageService
             var subscriptions = new List<string>();
             await foreach (var blob in _container.GetBlobsAsync(prefix: prefix))
             {
-                // Extrair subscription ID do path: .../subscription=XXXX/arquivo.json
+                // Extrair subscription ID do path: analyses/year=YYYY/month=MM/day=DD/SUBSCRIPTION_ID/arquivo.json
                 var pathParts = blob.Name.Split('/');
-                var subscriptionPart = pathParts.FirstOrDefault(p => p.StartsWith("subscription="));
-                if (!string.IsNullOrEmpty(subscriptionPart))
+                if (pathParts.Length >= 5) // Precisa de pelo menos 5 partes
                 {
-                    var subscriptionId = subscriptionPart.Substring("subscription=".Length);
-                    if (!subscriptions.Contains(subscriptionId))
+                    var subscriptionId = pathParts[4]; // Posição correta após day=DD
+                    if (!string.IsNullOrEmpty(subscriptionId) && !subscriptions.Contains(subscriptionId))
                     {
                         subscriptions.Add(subscriptionId);
                     }
@@ -154,7 +183,15 @@ public class AnalysisStorageService
     }
 
     /// <summary>
-    /// 🗃️ Carrega todas as análises de um dia específico
+    /// � Obtém o cliente do container para debug (uso interno)
+    /// </summary>
+    public BlobContainerClient GetContainerClient()
+    {
+        return _container;
+    }
+
+    /// <summary>
+    /// �🗃️ Carrega todas as análises de um dia específico
     /// </summary>
     public async Task<List<CostRecommendation>> GetDailyAnalysisAsync(DateTime date)
     {
@@ -170,15 +207,73 @@ public class AnalysisStorageService
                 // Apenas arquivos de recomendações, não raw-analysis
                 if (blob.Name.EndsWith(BlobPathBuilder.FileNames.Recommendations))
                 {
-                    var blobClient = _container.GetBlobClient(blob.Name);
-                    var response = await blobClient.DownloadStreamingAsync();
-                    using var reader = new StreamReader(response.Value.Content);
-                    var json = await reader.ReadToEndAsync();
-                    
-                    var recommendations = JsonSerializer.Deserialize<List<CostRecommendation>>(json, _jsonOptions);
-                    if (recommendations != null)
+                    try
                     {
-                        allRecommendations.AddRange(recommendations);
+                        _logger.LogInformation("🔍 Processando blob: {blobName}", blob.Name);
+                        
+                        var blobClient = _container.GetBlobClient(blob.Name);
+                        
+                        // Verificar se o blob existe e tem conteúdo
+                        var properties = await blobClient.GetPropertiesAsync();
+                        _logger.LogInformation("📏 Tamanho do blob: {size} bytes", properties.Value.ContentLength);
+                        
+                        if (properties.Value.ContentLength == 0)
+                        {
+                            _logger.LogWarning("⚠️ Blob vazio: {blobName}", blob.Name);
+                            continue;
+                        }
+                        
+                        var response = await blobClient.DownloadStreamingAsync();
+                        using var reader = new StreamReader(response.Value.Content);
+                        var json = await reader.ReadToEndAsync();
+                        
+                        _logger.LogInformation("📄 JSON length: {length}, starts with: {start}", 
+                            json.Length, 
+                            json.Length > 50 ? json.Substring(0, 50) : json);
+                        
+                        if (string.IsNullOrWhiteSpace(json))
+                        {
+                            _logger.LogWarning("⚠️ JSON vazio ou null: {blobName}", blob.Name);
+                            continue;
+                        }
+                        
+                        // 🔄 NOVA LÓGICA: Primeiro tentar como AnalysisResult completo
+                        List<CostRecommendation> recommendations = null;
+                        
+                        try
+                        {
+                            var analysisResult = JsonSerializer.Deserialize<FullAnalysisResult>(json, _jsonOptions);
+                            if (analysisResult?.Recommendations != null)
+                            {
+                                recommendations = analysisResult.Recommendations;
+                                _logger.LogInformation("✅ Deserializado como FullAnalysisResult: {count} recommendations", recommendations.Count);
+                            }
+                        }
+                        catch (Exception)
+                        {
+                            // Fallback: tentar deserializar diretamente como array
+                            _logger.LogInformation("🔄 Tentando deserializar como array direto...");
+                            try
+                            {
+                                recommendations = JsonSerializer.Deserialize<List<CostRecommendation>>(json, _jsonOptions);
+                                _logger.LogInformation("✅ Deserializado como array: {count} recommendations", recommendations?.Count ?? 0);
+                            }
+                            catch (Exception ex2)
+                            {
+                                _logger.LogError(ex2, "❌ Falha em ambos os formatos para {blobName}", blob.Name);
+                            }
+                        }
+                        
+                        if (recommendations != null && recommendations.Count > 0)
+                        {
+                            allRecommendations.AddRange(recommendations);
+                            _logger.LogInformation("📊 Total acumulado: {total} recommendations", allRecommendations.Count);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "❌ Erro ao processar blob {blobName}: {error}", blob.Name, ex.Message);
+                        // Continue processando outros blobs mesmo se um falhar
                     }
                 }
             }
@@ -199,19 +294,211 @@ public class AnalysisStorageService
     /// </summary>
     private object ExtractRecommendationsOnly(object analysisResult)
     {
-        // Se for FinOpsAnalysisResult, extrair apenas as recommendations
-        var resultType = analysisResult.GetType();
-        
-        if (resultType.Name == "FinOpsAnalysisResult")
+        try
         {
-            var recommendationsProperty = resultType.GetProperty("Recommendations");
-            var recommendations = recommendationsProperty?.GetValue(analysisResult);
-            
-            // 🎯 APENAS a lista de recomendações - sem metadados!
-            return recommendations ?? new List<object>();
+            // 🎯 NOVO: Processar resultado de análise com findings
+            if (analysisResult is not null)
+            {
+                var resultType = analysisResult.GetType();
+                
+                // Verificar se tem propriedade "findings" (novo formato)
+                var findingsProperty = resultType.GetProperty("findings");
+                if (findingsProperty != null)
+                {
+                    var findingsValue = findingsProperty.GetValue(analysisResult);
+                    if (findingsValue is IEnumerable<object> findings)
+                    {
+                        var allRecommendations = new List<object>();
+                        var analysisMetadata = new
+                        {
+                            subscription_id = resultType.GetProperty("subscription_id")?.GetValue(analysisResult),
+                            analysis_date = resultType.GetProperty("analysis_date")?.GetValue(analysisResult),
+                            analysis_timestamp = resultType.GetProperty("analysis_timestamp")?.GetValue(analysisResult),
+                            analysis_type = resultType.GetProperty("analysis_type")?.GetValue(analysisResult)
+                        };
+
+                        // Extrair findings de cada analyzer
+                        foreach (var finding in findings)
+                        {
+                            var findingType = finding.GetType();
+                            var findingsArrayProperty = findingType.GetProperty("Findings") ?? findingType.GetProperty("findings");
+                            
+                            if (findingsArrayProperty != null)
+                            {
+                                var findingsArray = findingsArrayProperty.GetValue(finding);
+                                if (findingsArray is IEnumerable<object> innerFindings)
+                                {
+                                    allRecommendations.AddRange(innerFindings);
+                                }
+                            }
+                        }
+
+                        // Criar resultado no formato esperado
+                        return new
+                        {
+                            analysisId = Guid.NewGuid().ToString(),
+                            executedAt = analysisMetadata.analysis_timestamp,
+                            scope = "subscription",
+                            subscriptionId = analysisMetadata.subscription_id,
+                            managementGroupId = (string?)null,
+                            analysisPeriodDays = 7,
+                            dryRun = true,
+                            recommendations = allRecommendations,
+                            summary = new
+                            {
+                                totalResourcesAnalyzed = allRecommendations.Count,
+                                totalRecommendations = allRecommendations.Count,
+                                totalEstimatedMonthlySavings = allRecommendations
+                                    .Where(r => r.GetType().GetProperty("estimatedMonthlySavings") != null)
+                                    .Sum(r => {
+                                        var prop = r.GetType().GetProperty("estimatedMonthlySavings");
+                                        var value = prop?.GetValue(r);
+                                        return value is decimal d ? d : 0m;
+                                    })
+                            }
+                        };
+                    }
+                }
+                
+                // Se for FinOpsAnalysisResult (formato antigo), extrair apenas as recommendations
+                if (resultType.Name == "FinOpsAnalysisResult")
+                {
+                    var recommendationsProperty = resultType.GetProperty("Recommendations");
+                    var recommendations = recommendationsProperty?.GetValue(analysisResult);
+                    return recommendations ?? new List<object>();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning("⚠️ Erro ao extrair recommendations: {error}", ex.Message);
         }
 
-        // Fallback: retorna original se não for FinOpsAnalysisResult
+        // Fallback: retorna original
         return analysisResult;
+    }
+
+    /// <summary>
+    /// 🔄 STEPS: Salva resultado de um step específico
+    /// Caminho: steps/analysisId/stepType-results.json
+    /// </summary>
+    public async Task SaveStepResultAsync(string analysisId, string stepType, IList<object> findings)
+    {
+        try
+        {
+            var blobPath = $"steps/{analysisId}/{stepType}-results.json";
+            var blobClient = _container.GetBlobClient(blobPath);
+
+            var stepResult = new { StepType = stepType, Findings = findings, CompletedAt = DateTime.UtcNow };
+            var json = JsonSerializer.Serialize(stepResult, _jsonOptions);
+            
+            using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json));
+            await blobClient.UploadAsync(stream, overwrite: true);
+            
+            _logger.LogInformation("💾 [STEP] Resultado salvo: {stepType} para {analysisId}", stepType, analysisId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ [STEP] Erro ao salvar step {stepType}: {error}", stepType, ex.Message);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 📂 STEPS: Carrega resultado de um step específico
+    /// </summary>
+    public async Task<List<object>> LoadStepResultAsync(string analysisId, string stepType)
+    {
+        try
+        {
+            var blobPath = $"steps/{analysisId}/{stepType}-results.json";
+            var blobClient = _container.GetBlobClient(blobPath);
+
+            if (!await blobClient.ExistsAsync())
+            {
+                _logger.LogWarning("⚠️ [STEP] Resultado não encontrado: {stepType} para {analysisId}", stepType, analysisId);
+                return new List<object>();
+            }
+
+            var response = await blobClient.DownloadContentAsync();
+            var json = response.Value.Content.ToString();
+            var stepResult = JsonSerializer.Deserialize<JsonElement>(json);
+            
+            // Retorna apenas os findings (case insensitive - pode ser "findings" ou "Findings")
+            if (stepResult.TryGetProperty("findings", out var findingsElement) || 
+                stepResult.TryGetProperty("Findings", out findingsElement))
+            {
+                return findingsElement.EnumerateArray().Select(f => (object)f).ToList();
+            }
+            
+            return new List<object>();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ [STEP] Erro ao carregar step {stepType}: {error}", stepType, ex.Message);
+            return new List<object>();
+        }
+    }
+
+    /// <summary>
+    /// ✅ STEPS: Marca step como concluído
+    /// </summary>
+    public async Task MarkStepCompletedAsync(string analysisId, string stepType)
+    {
+        try
+        {
+            var blobPath = $"steps/{analysisId}/completed-steps.json";
+            var blobClient = _container.GetBlobClient(blobPath);
+
+            var completedSteps = new List<string>();
+            
+            // Carrega steps já concluídos
+            if (await blobClient.ExistsAsync())
+            {
+                var response = await blobClient.DownloadContentAsync();
+                var json = response.Value.Content.ToString();
+                completedSteps = JsonSerializer.Deserialize<List<string>>(json) ?? new List<string>();
+            }
+
+            // Adiciona novo step se não existe
+            if (!completedSteps.Contains(stepType))
+            {
+                completedSteps.Add(stepType);
+                var updatedJson = JsonSerializer.Serialize(completedSteps, _jsonOptions);
+                
+                using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(updatedJson));
+                await blobClient.UploadAsync(stream, overwrite: true);
+                
+                _logger.LogInformation("✅ [STEP] Marcado como concluído: {stepType} para {analysisId}", stepType, analysisId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ [STEP] Erro ao marcar step concluído {stepType}: {error}", stepType, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// 🔍 STEPS: Verifica quais steps já foram concluídos
+    /// </summary>
+    public async Task<List<string>> GetCompletedStepsAsync(string analysisId)
+    {
+        try
+        {
+            var blobPath = $"steps/{analysisId}/completed-steps.json";
+            var blobClient = _container.GetBlobClient(blobPath);
+
+            if (!await blobClient.ExistsAsync())
+                return new List<string>();
+
+            var response = await blobClient.DownloadContentAsync();
+            var json = response.Value.Content.ToString();
+            return JsonSerializer.Deserialize<List<string>>(json) ?? new List<string>();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ [STEP] Erro ao verificar steps concluídos: {error}", ex.Message);
+            return new List<string>();
+        }
     }
 }

@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Text.Json;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
@@ -34,7 +34,7 @@ public class CostAnalysisFunctions
         [HttpTrigger(AuthorizationLevel.Anonymous, "get")] HttpRequestData req)
     {
         var response = req.CreateResponse(HttpStatusCode.OK);
-        response.WriteString("✅ FinOps Cost Analysis API 🚀 NÍVEL 4 - Multi-Analyzer System");
+        response.WriteString("✅ FinOps Cost Analysis API");
         return response;
     }
 
@@ -81,7 +81,7 @@ public class CostAnalysisFunctions
                 // � DEBUG: Log detalhado do GET request
                 _logger.LogInformation("🐛 GET Request - iniciando parsing...");
                 
-                // 🚀 NÍVEL 4: GET com múltiplas análises habilitadas
+                // GET com múltiplas análises habilitadas
                 var subscriptionId = req.Query["subscriptionId"] ?? "";
                 
                 // ✅ Corrigir parsing do dryRun da query string - PROTEÇÃO ANTI-NULL
@@ -120,8 +120,8 @@ public class CostAnalysisFunctions
                 }
             }
 
-            // 🚀 NÍVEL 4: Usar orchestrator injetado via DI
-            _logger.LogInformation("🚀 NÍVEL 4: Iniciando análise com múltiplos analyzers em paralelo...");
+            // Usar orchestrator injetado via DI
+            _logger.LogInformation("Iniciando análise com múltiplos analyzers em paralelo...");
             
             // � DEBUG: Verificar se orchestrator está injetado
             _logger.LogInformation("🐛 Orchestrator: {orch}", _orchestrator == null ? "NULL" : "NOT NULL");
@@ -257,6 +257,89 @@ public class CostAnalysisFunctions
             });
             
             await errorResponse.WriteStringAsync(errorJson);
+            return errorResponse;
+        }
+    }
+
+    /// <summary>
+    /// 🔧 FORÇAR CONSOLIDAÇÃO - Para testar consolidação manual de steps
+    /// </summary>
+    [Function("force-consolidate")]
+    public async Task<HttpResponseData> ForceConsolidate(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "post")] HttpRequestData req)
+    {
+        try
+        {
+            var query = System.Web.HttpUtility.ParseQueryString(req.Url.Query);
+            var subscriptionId = query["subscriptionId"];
+            var date = query["date"] ?? DateTime.UtcNow.ToString("yyyy-MM-dd");
+
+            if (string.IsNullOrEmpty(subscriptionId))
+            {
+                var badResponse = req.CreateResponse(HttpStatusCode.BadRequest);
+                await badResponse.WriteStringAsync("Parâmetro subscriptionId é obrigatório");
+                return badResponse;
+            }
+
+            var analysisId = $"{subscriptionId}-{date}";
+            
+            _logger.LogInformation("🔧 [FORCE-CONSOLIDATE] Forçando consolidação para {analysisId}", analysisId);
+
+            // Carrega resultados parciais dos steps
+            var storageFindings = await _storageService.LoadStepResultAsync(analysisId, "storage");
+            var vmFindings = await _storageService.LoadStepResultAsync(analysisId, "vm");
+            var appServiceFindings = await _storageService.LoadStepResultAsync(analysisId, "appservice");
+            var publicIpFindings = await _storageService.LoadStepResultAsync(analysisId, "publicip");
+
+            var allFindings = new List<object>();
+            allFindings.AddRange(storageFindings);
+            allFindings.AddRange(vmFindings);
+            allFindings.AddRange(appServiceFindings);
+            allFindings.AddRange(publicIpFindings);
+
+            _logger.LogInformation("🔧 [FORCE-CONSOLIDATE] Carregados {count} findings de todos os steps", allFindings.Count);
+
+            // Cria resultado final
+            var finalResult = new
+            {
+                AnalysisId = analysisId,
+                SubscriptionId = subscriptionId,
+                CompletedAt = DateTime.UtcNow,
+                TotalFindings = allFindings.Count,
+                Findings = allFindings,
+                Recommendations = allFindings,
+                AnalysisType = "FORCED_CONSOLIDATION",
+                StepDetails = new
+                {
+                    Storage = storageFindings.Count,
+                    VM = vmFindings.Count,
+                    AppService = appServiceFindings.Count,
+                    PublicIP = publicIpFindings.Count
+                }
+            };
+
+            // Salva resultado final
+            await _storageService.SaveAsync(subscriptionId, finalResult, DateTime.UtcNow);
+
+            var response = req.CreateResponse(HttpStatusCode.OK);
+            var result = new
+            {
+                success = true,
+                message = "Consolidação forçada executada com sucesso",
+                analysisId = analysisId,
+                totalFindings = allFindings.Count,
+                stepDetails = finalResult.StepDetails
+            };
+
+            await response.WriteAsJsonAsync(result);
+            return response;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ [FORCE-CONSOLIDATE] Erro: {error}", ex.Message);
+            
+            var errorResponse = req.CreateResponse(HttpStatusCode.InternalServerError);
+            await errorResponse.WriteAsJsonAsync(new { error = ex.Message });
             return errorResponse;
         }
     }

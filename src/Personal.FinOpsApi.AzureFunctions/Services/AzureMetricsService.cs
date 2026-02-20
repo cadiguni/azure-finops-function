@@ -1,4 +1,4 @@
-﻿using Azure.Monitor.Query;
+using Azure.Monitor.Query;
 using Azure.Monitor.Query.Models;
 using Azure.ResourceManager;
 using Azure.ResourceManager.AppService;
@@ -17,7 +17,7 @@ public class AzureMetricsService
     private readonly ILogger<AzureMetricsService> _logger;
     
     // 🚦 Controle de paralelismo para evitar throttling
-    private readonly SemaphoreSlim _semaphore = new(5, 5); // Máximo 5 chamadas simultâneas
+    private readonly SemaphoreSlim _semaphore = new(3, 3); // Máximo 3 chamadas simultâneas para evitar timeout
     
     public AzureMetricsService(
         MetricsQueryClient metricsClient,
@@ -59,6 +59,9 @@ public class AzureMetricsService
             var endTime = DateTimeOffset.UtcNow;
             var startTime = endTime.AddDays(-analysisPeriodDays);
 
+            // 🚨 TIMEOUT PROTECTION: 30 segundos para query do Azure Monitor
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
             var response = await _metricsClient.QueryResourceAsync(
                 resourceId,
                 new[] { "CpuPercentage" },
@@ -66,7 +69,8 @@ public class AzureMetricsService
                 {
                     TimeRange = new QueryTimeRange(startTime, endTime),
                     Granularity = TimeSpan.FromHours(1)
-                }
+                },
+                cts.Token
             );
 
             if (response?.Value?.Metrics == null || !response.Value.Metrics.Any())
@@ -232,6 +236,9 @@ public class AzureMetricsService
                 {
                     _logger.LogDebug("🔍 Buscando requests REAIS para Web App: {webAppId}", webAppId);
 
+                    // 🚨 TIMEOUT PROTECTION: 20 segundos por Web App
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
                     var response = await _metricsClient.QueryResourceAsync(
                         webAppId,
                         new[] { "Requests" },
@@ -239,7 +246,8 @@ public class AzureMetricsService
                         {
                             TimeRange = new QueryTimeRange(startTime, endTime),
                             Granularity = TimeSpan.FromHours(1)
-                        }
+                        },
+                        cts.Token
                     );
 
                     if (response?.Value?.Metrics != null && response.Value.Metrics.Any())
@@ -346,6 +354,9 @@ public class AzureMetricsService
             // 1. 📊 Transactions (número de operações)
             try
             {
+                // 🚨 TIMEOUT PROTECTION: 25 segundos para Transactions query
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+                
                 var response = await _metricsClient.QueryResourceAsync(
                     resourceId,
                     new[] { "Transactions" },
@@ -353,7 +364,8 @@ public class AzureMetricsService
                     {
                         TimeRange = new QueryTimeRange(startTime, endTime),
                         Granularity = TimeSpan.FromHours(1)
-                    }
+                    },
+                    cts.Token
                 );
 
                 if (response?.Value?.Metrics != null && response.Value.Metrics.Any())
@@ -389,44 +401,42 @@ public class AzureMetricsService
                 metrics.AvgTransactionsPerDay = fallbackTransactions / analysisPeriodDays;
             }
 
-            // 2. 💾 UsedCapacity (capacidade utilizada) 
+            // 2. 💾 UsedCapacity (capacidade utilizada) - com múltiplas agregações
             try
             {
-                var response = await _metricsClient.QueryResourceAsync(
-                    resourceId,
-                    new[] { "UsedCapacity" },
-                    new MetricsQueryOptions
-                    {
-                        TimeRange = new QueryTimeRange(startTime, endTime),
-                        Granularity = TimeSpan.FromDays(1)
-                    }
+                // 🚨 TIMEOUT PROTECTION: 25 segundos para UsedCapacity query
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+                
+                var granularity = GetOptimalGranularity(analysisPeriodDays);
+                var timeRange = new QueryTimeRange(startTime, endTime);
+                
+                _logger.LogDebug("📊 Consultando UsedCapacity para {resource} com granularidade {granularity}", 
+                    resourceId, granularity);
+                
+                var (capacityValue, aggregationType, dataPointCount) = await TryMultipleAggregationsAsync(
+                    resourceId, 
+                    new[] { "UsedCapacity" }, 
+                    timeRange,
+                    granularity,
+                    cts.Token
                 );
 
-                if (response?.Value?.Metrics != null && response.Value.Metrics.Any())
+                if (capacityValue.HasValue)
                 {
-                    var capacityMetric = response.Value.Metrics.First();
-                    var totalCapacity = 0.0;
-                    var count = 0;
-
-                    foreach (var timeSeries in capacityMetric.TimeSeries)
-                    {
-                        foreach (var value in timeSeries.Values)
-                        {
-                            if (value.Average.HasValue)
-                            {
-                                totalCapacity += value.Average.Value;
-                                count++;
-                            }
-                        }
-                    }
-
-                    if (count > 0)
-                    {
-                        metrics.AvgUsedCapacityBytes = totalCapacity / count;
-                        metrics.AvgUsedCapacityGB = metrics.AvgUsedCapacityBytes / (1024 * 1024 * 1024);
-                        
-                        _logger.LogDebug("💾 Capacidade REAL média: {capacityGB:F2} GB", metrics.AvgUsedCapacityGB);
-                    }
+                    metrics.AvgUsedCapacityBytes = capacityValue.Value;
+                    metrics.AvgUsedCapacityGB = metrics.AvgUsedCapacityBytes / (1024 * 1024 * 1024);
+                    
+                    _logger.LogInformation("✅ UsedCapacity obtida: {capacityGB:F2} GB usando {aggregation} ({dataPoints} pontos)", 
+                        metrics.AvgUsedCapacityGB, aggregationType, dataPointCount);
+                }
+                else
+                {
+                    _logger.LogWarning("⚠️ UsedCapacity sem dados válidos após tentar múltiplas agregações - usando fallback");
+                    
+                    // Fallback: storage dev geralmente tem menos dados
+                    var fallbackGB = resourceId.ToLower().Contains("dev") ? 0.5 : 2.0;
+                    metrics.AvgUsedCapacityGB = fallbackGB;
+                    metrics.AvgUsedCapacityBytes = fallbackGB * 1024 * 1024 * 1024;
                 }
             }
             catch (Exception ex)
@@ -442,6 +452,9 @@ public class AzureMetricsService
             // 3. 🌐 Ingress/Egress (transferência de dados)
             try
             {
+                // 🚨 TIMEOUT PROTECTION: 25 segundos para Ingress/Egress query
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+                
                 var response = await _metricsClient.QueryResourceAsync(
                     resourceId,
                     new[] { "Ingress", "Egress" },
@@ -449,7 +462,8 @@ public class AzureMetricsService
                     {
                         TimeRange = new QueryTimeRange(startTime, endTime),
                         Granularity = TimeSpan.FromHours(1)
-                    }
+                    },
+                    cts.Token
                 );
 
                 if (response?.Value?.Metrics != null && response.Value.Metrics.Any())
@@ -552,30 +566,32 @@ public class AzureMetricsService
             {
                 try
                 {
-                    var response = await _metricsClient.QueryResourceAsync(
-                        resourceId,
-                        new[] { metricName },
-                        new MetricsQueryOptions
-                        {
-                            TimeRange = timespan,
-                            Granularity = TimeSpan.FromHours(1), // Granularidade de 1 hora
-                            Aggregations = { MetricAggregationType.Average }
-                        });
+                    // 🚨 TIMEOUT PROTECTION: 20 segundos por métrica de VM
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
                     
-                    var metric = response.Value.Metrics.FirstOrDefault();
-                    if (metric?.TimeSeries.Any() == true)
+                    var granularity = GetOptimalGranularity((int)(timespan.End - timespan.Start).Value.TotalDays);
+                    
+                    _logger.LogDebug("📊 Consultando {metric} para VM com granularidade {granularity}", 
+                        metricName, granularity);
+                    
+                    var (metricValue, aggregationType, dataPointCount) = await TryMultipleAggregationsAsync(
+                        resourceId, 
+                        new[] { metricName }, 
+                        timespan,
+                        granularity,
+                        cts.Token
+                    );
+                    
+                    if (metricValue.HasValue)
                     {
-                        var values = metric.TimeSeries
-                            .SelectMany(ts => ts.Values)
-                            .Where(v => v.Average.HasValue)
-                            .Select(v => v.Average.Value)
-                            .ToList();
-                        
-                        results[metricName] = values.Any() ? values.Average() : 0;
+                        results[metricName] = metricValue.Value;
+                        _logger.LogDebug("✅ {metric}: {value:F2} usando {aggregation} ({dataPoints} pontos)", 
+                            metricName, metricValue.Value, aggregationType, dataPointCount);
                     }
                     else
                     {
                         results[metricName] = 0;
+                        _logger.LogWarning("⚠️ {metric}: sem dados após múltiplas agregações - usando 0", metricName);
                     }
                 }
                 catch (Exception ex)
@@ -617,6 +633,99 @@ public class AzureMetricsService
         {
             _semaphore.Release();
         }
+    }
+
+    /// <summary>
+    /// 📊 Calcula granularidade dinâmica baseada no período
+    /// 7 dias: PT1H, 30+ dias: PT6H
+    /// </summary>
+    private TimeSpan GetOptimalGranularity(int analysisPeriodDays)
+    {
+        return analysisPeriodDays switch
+        {
+            <= 7 => TimeSpan.FromHours(1),   // PT1H - até 7 dias
+            <= 30 => TimeSpan.FromHours(6),  // PT6H - até 30 dias  
+            _ => TimeSpan.FromDays(1)        // P1D - mais de 30 dias
+        };
+    }
+
+    /// <summary>
+    /// 🎯 Tenta múltiplas agregações até encontrar dados: Maximum → Average → Minimum
+    /// </summary>
+    private async Task<(double? value, string aggregationType, int dataPointCount)> TryMultipleAggregationsAsync(
+        string resourceId, 
+        string[] metricNames, 
+        QueryTimeRange timeRange,
+        TimeSpan granularity,
+        CancellationToken cancellationToken)
+    {
+        var aggregationTypes = new[]
+        {
+            (MetricAggregationType.Maximum, "Maximum"),
+            (MetricAggregationType.Average, "Average"), 
+            (MetricAggregationType.Minimum, "Minimum")
+        };
+
+        foreach (var (aggregationType, typeName) in aggregationTypes)
+        {
+            try
+            {
+                var response = await _metricsClient.QueryResourceAsync(
+                    resourceId,
+                    metricNames,
+                    new MetricsQueryOptions
+                    {
+                        TimeRange = timeRange,
+                        Granularity = granularity,
+                        Aggregations = { aggregationType }
+                    },
+                    cancellationToken
+                );
+
+                if (response?.Value?.Metrics != null && response.Value.Metrics.Any())
+                {
+                    var metric = response.Value.Metrics.First();
+                    var values = new List<double>();
+
+                    foreach (var timeSeries in metric.TimeSeries)
+                    {
+                        foreach (var value in timeSeries.Values)
+                        {
+                            double? metricValue = aggregationType switch
+                            {
+                                MetricAggregationType.Maximum => value.Maximum,
+                                MetricAggregationType.Average => value.Average,
+                                MetricAggregationType.Minimum => value.Minimum,
+                                _ => value.Total // Fallback para Total se disponível
+                            };
+
+                            if (metricValue.HasValue)
+                            {
+                                values.Add(metricValue.Value);
+                            }
+                        }
+                    }
+
+                    if (values.Any())
+                    {
+                        // Para capacidade, usar o último valor (mais recente)
+                        // Para outras métricas, usar média
+                        var finalValue = metricNames.Contains("UsedCapacity") 
+                            ? values.Last() 
+                            : values.Average();
+                            
+                        return (finalValue, typeName, values.Count);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug("⚠️ Falha na agregação {aggregation} para {resource}: {error}", 
+                    typeName, resourceId, ex.Message);
+            }
+        }
+
+        return (null, "None", 0);
     }
 }
 

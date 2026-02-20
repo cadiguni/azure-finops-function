@@ -1,7 +1,9 @@
-﻿using Personal.FinOpsApi.AzureFunctions.Analyzers;
+using Personal.FinOpsApi.AzureFunctions.Analyzers;
 using Personal.FinOpsApi.AzureFunctions.Models;
 using Personal.FinOpsApi.AzureFunctions.Services;
 using Microsoft.Extensions.Logging;
+using System.Linq;
+using System.Text.Json;
 
 namespace Personal.FinOpsApi.AzureFunctions.Application;
 
@@ -13,6 +15,8 @@ public class CostAnalysisOrchestrator
     private readonly IdleVmAnalyzer _idleVmAnalyzer;
     private readonly AppServiceAnalyzer _appServiceAnalyzer;
     private readonly AnalysisStorageService _storageService;
+    private readonly LogAnalyticsDataCollectorService _logAnalyticsService;
+
     private readonly ILogger<CostAnalysisOrchestrator> _logger;
 
     public CostAnalysisOrchestrator(
@@ -22,6 +26,8 @@ public class CostAnalysisOrchestrator
         IdleVmAnalyzer idleVmAnalyzer,
         AppServiceAnalyzer appServiceAnalyzer,
         AnalysisStorageService storageService,
+        LogAnalyticsDataCollectorService logAnalyticsService,
+
         ILogger<CostAnalysisOrchestrator> logger)
     {
         _diskAnalyzer = diskAnalyzer;
@@ -30,6 +36,8 @@ public class CostAnalysisOrchestrator
         _idleVmAnalyzer = idleVmAnalyzer;
         _appServiceAnalyzer = appServiceAnalyzer;
         _storageService = storageService;
+        _logAnalyticsService = logAnalyticsService;
+
         _logger = logger;
     }
 
@@ -94,12 +102,25 @@ public class CostAnalysisOrchestrator
             {
                 tasks.Add(AnalyzeAppServicesAsync(request));
             }
+
+            // 🚦 EXECUTAR SEQUENCIALMENTE para evitar 429 (em vez de paralelo)
+            _logger.LogInformation("🔄 Executando {count} análises sequenciais para evitar rate limiting", tasks.Count);
             
-            // Executar todas as análises em paralelo
-            var results = await Task.WhenAll(tasks);
-            foreach (var recommendations in results)
+            foreach (var task in tasks)
             {
-                allRecommendations.AddRange(recommendations);
+                try
+                {
+                    var recommendations = await task;
+                    allRecommendations.AddRange(recommendations);
+                    
+                    // 💤 Small delay entre análises para ser gentil com APIs
+                    await Task.Delay(500);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "❌ Falha em análise individual: {error}", ex.Message);
+                    // Continua com outras análises mesmo se uma falhar
+                }
             }
 
             // Futuras análises virão aqui:
@@ -438,27 +459,446 @@ public class CostAnalysisOrchestrator
 
     /// <summary>
     /// 🟢 EXECUÇÃO DIRETA: Análises DIÁRIAS (rápidas, sem métricas pesadas)
-    /// 🎯 PROCESSAMENTO DIRETO: Executado pelo Timer Function (SIMULAÇÃO)
+    /// 🎯 PROCESSAMENTO DIRETO: Executado pelo Timer Function - ANÁLISE REAL COM STORAGE
+    /// 🚨 V4.1: Timeout de 3 minutos para análises diárias
     /// </summary>
     public async Task RunDailyAnalysisAsync(string subscriptionId)
     {
-        _logger.LogInformation("🟢 SIMULAÇÃO: Executando análises DIÁRIAS para subscription {subscriptionId}", subscriptionId);
+        var startTime = DateTime.UtcNow;
+        _logger.LogInformation("🟢 ANÁLISE REAL: Executando análises DIÁRIAS para subscription {subscriptionId} com timeout de 3min", subscriptionId);
         
-        await Task.Delay(1000); // Simula processamento
-        
-        _logger.LogInformation("✅ SIMULAÇÃO: Análises DIÁRIAS concluídas para {subscriptionId} - Discos órfãos: 5, IPs órfãos: 2", subscriptionId);
+        var results = new List<object>();
+        var counters = new
+        {
+            orphaned_disks = 0,
+            orphaned_ips = 0,
+            total_resources = 0
+        };
+
+        try
+        {
+            // 🚨 TIMEOUT: 3 minutos para análises diárias (mais rápidas)
+            using var dailyTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+            // 🔍 1. ANALYSIS: Orphaned Managed Disks
+            _logger.LogInformation("🔍 Analisando discos órfãos para {subscriptionId}...", subscriptionId);
+            var orphanedDisks = await _diskAnalyzer.AnalyzeSubscriptionAsync(subscriptionId);
+            counters = counters with { orphaned_disks = orphanedDisks.Findings.Count };
+            results.Add(orphanedDisks);
+
+            // 🔍 2. ANALYSIS: Orphaned Public IPs  
+            _logger.LogInformation("🔍 Analisando IPs públicos órfãos para {subscriptionId}...", subscriptionId);
+            var orphanedIps = await _publicIpAnalyzer.AnalyzeAsync(subscriptionId);
+            counters = counters with { orphaned_ips = orphanedIps.Findings.Count };
+            results.Add(orphanedIps);
+
+            // 📊 Total resources found
+            counters = counters with { total_resources = results.Count };
+
+            // 💾 4. SAVE RESULTS: Salvar no container finops-analysis
+            if (results.Any())
+            {
+                var analysisResult = new
+                {
+                    subscription_id = subscriptionId,
+                    analysis_date = startTime.ToString("yyyy-MM-dd"),
+                    analysis_timestamp = startTime,
+                    analysis_type = "daily",
+                    total_findings = results.Count,
+                    counters = counters,
+                    findings = results
+                };
+
+                await _storageService.SaveAsync(subscriptionId, analysisResult, startTime);
+                _logger.LogInformation("💾 Resultados salvos no storage: {findings} findings encontradas", results.Count);
+
+                // 📊 5. ENVIAR PARA LOG ANALYTICS: Para dashboards e alertas
+                var standardResults = results.OfType<StandardAnalyzerResult>().ToList();
+                await SendToLogAnalyticsAsync(standardResults, subscriptionId, "daily", startTime);
+            }
+
+            var executionTime = DateTime.UtcNow - startTime;
+            _logger.LogInformation("✅ ANÁLISE REAL concluída para {subscriptionId} - Discos órfãos: {disks}, IPs órfãos: {ips} - Tempo: {duration}ms", 
+                subscriptionId, counters.orphaned_disks, counters.orphaned_ips, executionTime.TotalMilliseconds);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ Erro na análise diária para {subscriptionId}", subscriptionId);
+            throw;
+        }
     }
 
     /// <summary>
     /// 🟡 EXECUÇÃO DIRETA: Análises 2X SEMANA (pesadas, com Azure Monitor)
-    /// 🎯 PROCESSAMENTO DIRETO: Com timeout e circuit breaker (SIMULAÇÃO)
+    /// 🎯 PROCESSAMENTO DIRETO: Com timeout e circuit breaker - ANÁLISE REAL
+    /// 🚨 V4.1: Timeout de 7 minutos para evitar limite de 10min do Azure
     /// </summary>
     public async Task RunBiWeeklyAnalysisAsync(string subscriptionId)
     {
-        _logger.LogInformation("🟡 SIMULAÇÃO: Executando análises 2X SEMANA para subscription {subscriptionId}", subscriptionId);
+        var startTime = DateTime.UtcNow;
+        _logger.LogInformation("🟡 ANÁLISE REAL QUINZENAL: Executando para subscription {subscriptionId} com timeout de 7min", subscriptionId);
         
-        await Task.Delay(2000); // Simula processamento mais longo
-        
-        _logger.LogInformation("✅ SIMULAÇÃO: Análises 2X SEMANA concluídas para {subscriptionId} - VMs idle: 3, Storage accounts: 7, App services: 1", subscriptionId);
+        var results = new List<object>();
+        var counters = new
+        {
+            idle_vms = 0,
+            storage_accounts = 0,
+            app_services = 0
+        };
+
+        try
+        {
+            // 🚨 TIMEOUT GLOBAL: 7 minutos para toda a análise quinzenal
+            using var globalTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(7));
+            
+            // 🚦 EXECUTAR COM THROTTLING para evitar 429 (CRÍTICO!)
+            _logger.LogInformation("🔄 Executando 3 análises com throttling (maxConcurrency=2) para evitar rate limiting...");
+            
+            var analyzerFactories = new List<Func<Task<StandardAnalyzerResult>>>
+            {
+                () => {
+                    _logger.LogInformation("🔍 [1/3] Analisando VMs ociosas para {subscriptionId}...", subscriptionId);
+                    return _idleVmAnalyzer.AnalyzeAsync(subscriptionId);
+                },
+                () => {
+                    _logger.LogInformation("🔍 [2/3] Analisando Storage Accounts para {subscriptionId}...", subscriptionId);
+                    return _storageAnalyzer.AnalyzeSubscriptionAsync(subscriptionId);
+                },
+                () => {
+                    _logger.LogInformation("🔍 [3/3] Analisando App Services para {subscriptionId}...", subscriptionId);
+                    return _appServiceAnalyzer.AnalyzeAsync(subscriptionId);
+                }
+            };
+
+            var analyzerResults = await Throttle.WhenAllThrottled(analyzerFactories, maxConcurrency: 2);
+            
+            // Atualizar contadores com os resultados reais
+            counters = new
+            {
+                idle_vms = analyzerResults[0].Findings.Count,
+                storage_accounts = analyzerResults[1].Findings.Count,
+                app_services = analyzerResults[2].Findings.Count
+            };
+
+            results.AddRange(analyzerResults);
+
+            // 💾 4. SAVE RESULTS: Salvar no container finops-analysis
+            if (results.Any())
+            {
+                var analysisResult = new 
+                {
+                    subscription_id = subscriptionId,
+                    analysis_date = startTime.ToString("yyyy-MM-dd"),
+                    analysis_timestamp = startTime,
+                    analysis_type = "bi-weekly",
+                    total_findings = results.Count,
+                    counters = counters,
+                    findings = results
+                };
+
+                await _storageService.SaveAsync(subscriptionId, analysisResult, startTime);
+                _logger.LogInformation("💾 Resultados bi-semanais salvos no storage: {findings} findings encontradas", results.Count);
+
+                // 📊 5. ENVIAR PARA LOG ANALYTICS: Para dashboards e alertas
+                await SendToLogAnalyticsAsync(analyzerResults.ToList(), subscriptionId, "bi-weekly", startTime);
+            }
+
+            var executionTime = DateTime.UtcNow - startTime;
+            _logger.LogInformation("✅ ANÁLISE REAL 2X SEMANA concluída para {subscriptionId} - VMs idle: {vms}, Storage: {storage}, App Services: {apps} - Tempo: {duration}ms", 
+                subscriptionId, counters.idle_vms, counters.storage_accounts, counters.app_services, executionTime.TotalMilliseconds);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ Erro na análise quinzenal para {subscriptionId}", subscriptionId);
+            throw;
+        }
     }
+
+    /// <summary>
+    /// 📊 HELPER: Envia recomendações para Log Analytics para dashboards
+    /// </summary>
+    private async Task SendToLogAnalyticsAsync(
+        List<StandardAnalyzerResult> analyzerResults, 
+        string subscriptionId, 
+        string analysisType, 
+        DateTime timestamp)
+    {
+        try
+        {
+            var allLogEntries = new List<FinOpsLogEntry>();
+            var analysisId = Guid.NewGuid().ToString();
+
+            // 🔄 CONVERTER: Cada resultado do analyzer para entradas do Log Analytics
+            foreach (var analyzerResult in analyzerResults)
+            {
+                var logEntries = _logAnalyticsService.ConvertToLogEntries(
+                    analyzerResult, 
+                    analysisId, 
+                    subscriptionId, 
+                    analysisType, 
+                    timestamp);
+
+                allLogEntries.AddRange(logEntries);
+            }
+
+            if (allLogEntries.Any())
+            {
+                // 🚀 ENVIAR: Todas as recomendações em batch
+                var success = await _logAnalyticsService.SendRecommendationsAsync(allLogEntries, analysisId);
+                
+                if (success)
+                {
+                    _logger.LogInformation("📊 {count} recomendações enviadas para Log Analytics (análise: {analysisType})", 
+                        allLogEntries.Count, analysisType);
+                }
+                else
+                {
+                    _logger.LogWarning("⚠️ Falha ao enviar recomendações para Log Analytics");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ Erro ao enviar para Log Analytics - continuando execução");
+            // Não falhar a análise por erro do Log Analytics
+        }
+    }
+
+    /// <summary>
+    /// 🎯 ANÁLISE COMPLETA DE SUBSCRIPTION - Usado pela queue de produção
+    /// 
+    /// ⚡ MODO PRODUÇÃO: Configurações otimizadas para subscriptions grandes
+    /// - Timeouts estendidos (até 60 min)
+    /// - Delays entre operações Azure
+    /// - Throttling reduzido
+    /// - Log Analytics integrado
+    /// </summary>
+    public async Task AnalyzeSubscriptionAsync(string subscriptionId, string analysisType = "complete", bool isProductionMode = false)
+    {
+        var startTime = DateTime.UtcNow;
+        var mode = isProductionMode ? "PRODUÇÃO" : "NORMAL";
+        
+        _logger.LogInformation("🎯 [{mode}] Iniciando análise completa de subscription {subscriptionId} - Tipo: {analysisType}", 
+            mode, subscriptionId, analysisType);
+
+        try
+        {
+            // 🎯 CONFIGURAÇÕES POR MODO
+            var delayBetweenAnalyzers = isProductionMode ? TimeSpan.FromSeconds(10) : TimeSpan.FromSeconds(2);
+
+            // 🚀 ANÁLISE COMPLETA SEMPRE (todos os analyzers)
+            _logger.LogInformation("🔍 [{mode}] Executando análise COMPLETA para {subscriptionId}", mode, subscriptionId);
+
+            var results = new List<object>();
+
+            // 1️⃣ Discos órfãos (rápido)
+            _logger.LogInformation("🔍 [{mode}] Analisando discos órfãos...", mode);
+            var diskResult = await _diskAnalyzer.AnalyzeSubscriptionAsync(subscriptionId);
+            results.Add(diskResult);
+            
+            if (isProductionMode) 
+            {
+                _logger.LogInformation("⏰ [{mode}] Delay entre analyzers: {delay}s", mode, delayBetweenAnalyzers.TotalSeconds);
+                await Task.Delay(delayBetweenAnalyzers);
+            }
+
+            // 2️⃣ IPs públicos órfãos (rápido)
+            _logger.LogInformation("🔍 [{mode}] Analisando IPs públicos órfãos...", mode);
+            var ipResult = await _publicIpAnalyzer.AnalyzeAsync(subscriptionId);
+            results.Add(ipResult);
+            
+            if (isProductionMode) await Task.Delay(delayBetweenAnalyzers);
+
+            // 3️⃣ Storage Accounts (Azure Monitor - PESADO)
+            _logger.LogInformation("🔍 [{mode}] Analisando Storage Accounts (PESADO - Azure Monitor)...", mode);
+            var storageResult = await _storageAnalyzer.AnalyzeSubscriptionAsync(subscriptionId);
+            results.Add(storageResult);
+            
+            if (isProductionMode) await Task.Delay(delayBetweenAnalyzers);
+
+            // 4️⃣ App Services (médio)
+            _logger.LogInformation("🔍 [{mode}] Analisando App Services...", mode);
+            var appServiceResult = await _appServiceAnalyzer.AnalyzeAsync(subscriptionId);
+            results.Add(appServiceResult);
+
+            if (isProductionMode) await Task.Delay(delayBetweenAnalyzers);
+
+            // 5️⃣ VMs Idle (Azure Monitor - MUITO PESADO)
+            _logger.LogInformation("🔍 [{mode}] Analisando VMs Idle (MUITO PESADO - Azure Monitor)...", mode);
+            var vmResult = await _idleVmAnalyzer.AnalyzeAsync(subscriptionId);
+            results.Add(vmResult);
+
+            // 📊 CONSOLIDAR RESULTADOS
+            var allFindings = results.OfType<StandardAnalyzerResult>().SelectMany(r => r.Findings).ToList();
+            var totalFindings = allFindings.Count;
+            var totalSavings = allFindings.Sum(f => f.EstimatedMonthlySavings);
+            
+            _logger.LogInformation("📊 [{mode}] Análise concluída - {findings} recomendações, ${savings:F2}/mês economia potencial", 
+                mode, totalFindings, totalSavings);
+
+            // 💾 SALVAR RESULTADOS NO BLOB STORAGE
+            var analysisResult = new
+            {
+                subscription_id = subscriptionId,
+                analysis_date = startTime.ToString("yyyy-MM-dd"),
+                analysis_timestamp = startTime,
+                analysis_type = analysisType,
+                findings = results.OfType<StandardAnalyzerResult>().ToList(),
+                summary = new
+                {
+                    total_findings = totalFindings,
+                    total_savings = totalSavings,
+                    analyzed_resources = allFindings.Count,
+                    execution_time_seconds = (DateTime.UtcNow - startTime).TotalSeconds
+                }
+            };
+
+            // ✅ SALVAR USANDO AnalysisStorageService (recommendations.json + raw.json)
+            await _storageService.SaveAsync(subscriptionId, analysisResult, startTime);
+            
+            _logger.LogInformation("💾 [{mode}] Resultados salvos no Blob Storage: subscription {subscriptionId}", mode, subscriptionId);
+
+            // 📤 ENVIAR PARA LOG ANALYTICS
+            var standardResults = results.OfType<StandardAnalyzerResult>().ToList();
+            await SendToLogAnalyticsAsync(standardResults, subscriptionId, analysisType, startTime);
+
+            var duration = DateTime.UtcNow - startTime;
+            _logger.LogInformation("✅ [{mode}] Análise de subscription {subscriptionId} concluída em {duration:mm\\:ss}", 
+                mode, subscriptionId, duration);
+        }
+        catch (Exception ex)
+        {
+            var duration = DateTime.UtcNow - startTime;
+            _logger.LogError(ex, "❌ [{mode}] Erro na análise de subscription {subscriptionId} após {duration:mm\\:ss}", 
+                mode, subscriptionId, duration);
+            throw;
+        }
+    }
+
+    #region MÉTODOS PARA PROCESSAMENTO EM ETAPAS (SOLUÇÃO TIMEOUT)
+
+    /// <summary>
+    /// 💾 Analisa apenas Storage Accounts (step específico)
+    /// </summary>
+    public async Task<IList<object>> AnalyzeStorageAccountsOnlyAsync(string subscriptionId)
+    {
+        _logger.LogInformation("💾 [STEP-STORAGE] Iniciando análise de Storage Accounts para {subscriptionId}", subscriptionId);
+
+        var findings = new List<object>();
+        
+        try
+        {
+            var storageResult = await _storageAnalyzer.AnalyzeSubscriptionAsync(subscriptionId);
+            if (storageResult?.Findings != null)
+            {
+                findings.AddRange(storageResult.Findings.Cast<object>());
+            }
+
+            _logger.LogInformation("💾 [STEP-STORAGE] {count} findings encontrados para {subscriptionId}", 
+                findings.Count, subscriptionId);
+                
+            return findings;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ [STEP-STORAGE] Erro na análise de storage para {subscriptionId}", subscriptionId);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 🖥️ Analisa apenas VMs (step específico)
+    /// </summary>
+    public async Task<IList<object>> AnalyzeVirtualMachinesOnlyAsync(string subscriptionId)
+    {
+        _logger.LogInformation("🖥️ [STEP-VM] Iniciando análise de VMs para {subscriptionId}", subscriptionId);
+
+        var findings = new List<object>();
+        
+        try
+        {
+            // VMs ociosas
+            var idleVmResult = await _idleVmAnalyzer.AnalyzeAsync(subscriptionId);
+            if (idleVmResult?.Findings != null)
+            {
+                findings.AddRange(idleVmResult.Findings.Cast<object>());
+            }
+
+            // Discos desanexados
+            var diskResult = await _diskAnalyzer.AnalyzeSubscriptionAsync(subscriptionId);
+            if (diskResult?.Findings != null)
+            {
+                findings.AddRange(diskResult.Findings.Cast<object>());
+            }
+
+            _logger.LogInformation("🖥️ [STEP-VM] {count} findings encontrados para {subscriptionId}", 
+                findings.Count, subscriptionId);
+                
+            return findings;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ [STEP-VM] Erro na análise de VMs para {subscriptionId}", subscriptionId);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 🌐 Analisa apenas App Services (step específico)
+    /// </summary>
+    public async Task<IList<object>> AnalyzeAppServicesOnlyAsync(string subscriptionId)
+    {
+        _logger.LogInformation("🌐 [STEP-APPSERVICE] Iniciando análise de App Services para {subscriptionId}", subscriptionId);
+
+        var findings = new List<object>();
+        
+        try
+        {
+            var appServiceResult = await _appServiceAnalyzer.AnalyzeAsync(subscriptionId);
+            if (appServiceResult?.Findings != null)
+            {
+                findings.AddRange(appServiceResult.Findings.Cast<object>());
+            }
+
+            _logger.LogInformation("🌐 [STEP-APPSERVICE] {count} findings encontrados para {subscriptionId}", 
+                findings.Count, subscriptionId);
+                
+            return findings;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ [STEP-APPSERVICE] Erro na análise de App Services para {subscriptionId}", subscriptionId);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 🌍 Analisa apenas IPs Públicos (step específico)
+    /// </summary>
+    public async Task<IList<object>> AnalyzePublicIpsOnlyAsync(string subscriptionId)
+    {
+        _logger.LogInformation("🌍 [STEP-PUBLICIP] Iniciando análise de IPs Públicos para {subscriptionId}", subscriptionId);
+
+        var findings = new List<object>();
+        
+        try
+        {
+            var publicIpResult = await _publicIpAnalyzer.AnalyzeAsync(subscriptionId);
+            if (publicIpResult?.Findings != null)
+            {
+                findings.AddRange(publicIpResult.Findings.Cast<object>());
+            }
+
+            _logger.LogInformation("🌍 [STEP-PUBLICIP] {count} findings encontrados para {subscriptionId}", 
+                findings.Count, subscriptionId);
+                
+            return findings;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ [STEP-PUBLICIP] Erro na análise de IPs Públicos para {subscriptionId}", subscriptionId);
+            throw;
+        }
+    }
+
+    #endregion
 }

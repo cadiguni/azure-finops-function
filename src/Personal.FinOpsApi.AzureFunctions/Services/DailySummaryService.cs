@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using Azure.Storage.Blobs;
 using Personal.FinOpsApi.AzureFunctions.Application;
 using Personal.FinOpsApi.AzureFunctions.Models;
@@ -60,7 +60,17 @@ public class DailySummaryService
             // 4. Gerar e salvar Top 10
             var analysisDate = DateTime.ParseExact(date, "yyyy-MM-dd", null);
             var top10 = await _orchestrator.BuildTop10Async(analysisDate);
-            await SaveTop10Async(date, top10);
+            
+            // 5. Salvar Top 10 apenas se não for null
+            if (top10 != null)
+            {
+                await SaveTop10Async(date, top10);
+                _logger.LogInformation("📈 Top 10 salvo com {count} itens", top10.Top10?.Count ?? 0);
+            }
+            else
+            {
+                _logger.LogWarning("⚠️ Top 10 não gerado - nenhuma recomendação encontrada para {date}", date);
+            }
             
             _logger.LogInformation("✅ Summary gerado: {totalSavings:C} de economia potencial", summary.TotalPotentialSavings);
             return summary;
@@ -81,7 +91,7 @@ public class DailySummaryService
         
         try
         {
-            var containerName = _configuration["RESULTS_CONTAINER_NAME"] ?? "cost-analysis";
+            var containerName = _configuration["RESULTS_CONTAINER_NAME"] ?? "finops-analysis";
             var containerClient = _blobServiceClient.GetBlobContainerClient(containerName);
             
             // 🎯 FASE B - Usar BlobPathBuilder padronizado para analyses/
@@ -105,19 +115,26 @@ public class DailySummaryService
                     var content = await blobClient.DownloadContentAsync();
                     var contentStr = content.Value.Content.ToString();
                     
-                    // 🎯 NOVO FORMATO: recommendations.json é agora uma lista direta
-                    var recommendations = JsonSerializer.Deserialize<List<StandardFinding>>(contentStr, _jsonOptions);
+                    // 🎯 NOVO FORMATO: recommendations.json tem estrutura { recommendations: [...] }
+                    using var doc = JsonDocument.Parse(contentStr);
+                    var root = doc.RootElement;
                     
-                    if (recommendations != null)
+                    // Verificar se tem a propriedade "recommendations"
+                    if (root.TryGetProperty("recommendations", out var recommendationsElement))
                     {
-                        // Converter recomendações para CostFinding
-                        foreach (var rec in recommendations)
+                        var recommendations = JsonSerializer.Deserialize<List<StandardFinding>>(
+                            recommendationsElement.GetRawText(), _jsonOptions);
+                        
+                        if (recommendations != null)
                         {
-                            var finding = new CostFinding
+                            // Converter recomendações para CostFinding
+                            foreach (var rec in recommendations)
                             {
-                                ResourceId = rec.ResourceId,
-                                ResourceType = rec.Type,
-                                ResourceName = rec.ResourceName,
+                                var finding = new CostFinding
+                                {
+                                    ResourceId = rec.ResourceId,
+                                    ResourceType = rec.Type,
+                                    ResourceName = rec.ResourceName,
                                 SubscriptionId = rec.SubscriptionId,
                                 ResourceGroup = rec.ResourceGroup,
                                 EstimatedMonthlyCost = rec.EstimatedMonthlySavings / 0.7m, // Reverse engineer do custo
@@ -131,6 +148,11 @@ public class DailySummaryService
                         }
                         
                         _logger.LogDebug("📄 Processado blob: {name} ({count} findings)", blobItem.Name, recommendations.Count);
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogWarning("📄 Blob {name} não contém estrutura 'recommendations' esperada", blobItem.Name);
                     }
                 }
                 catch (Exception ex)
@@ -206,7 +228,7 @@ public class DailySummaryService
     {
         try
         {
-            var containerName = _configuration["RESULTS_CONTAINER_NAME"] ?? "cost-analysis";
+            var containerName = _configuration["RESULTS_CONTAINER_NAME"] ?? "finops-analysis";
             var containerClient = _blobServiceClient.GetBlobContainerClient(containerName);
             await containerClient.CreateIfNotExistsAsync();
 

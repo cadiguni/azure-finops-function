@@ -1,4 +1,4 @@
-﻿{
+{
   "IsEncrypted": false,
   "Values": {
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
@@ -14,15 +14,9 @@
     "QUEUE_ANALYSIS_STEP_STARTER": "subscription-analysis-step-starter",
     "QUEUE_ANALYSIS_STEPS": "subscription-analysis-steps",
     "AZURE_SUBSCRIPTION_IDS": "<OPTIONAL_COMMA_SEPARATED_SUBSCRIPTIONS>",
-    "AZURE_SUBSCRIPTION_ID": "<OPTIONAL_SINGLE_SUBSCRIPTION_ID>",
     "AZURE_MANAGEMENT_GROUP_ID": "<OPTIONAL_MANAGEMENT_GROUP_ID>",
     "AZURE_DISCOVER_ALL_SUBSCRIPTIONS": "false",
     "CostAnalysisSchedule": "0 */10 * * * *",
     "DailySummarySchedule": "0 */5 * * * *"
-  },
-  "Host": {
-    "LocalHttpPort": 7071,
-    "CORS": "*",
-    "CORSCredentials": false
   }
 }

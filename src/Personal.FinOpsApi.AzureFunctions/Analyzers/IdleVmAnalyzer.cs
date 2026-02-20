@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using Azure.Identity;
 using Microsoft.Extensions.Logging;
 using Personal.FinOpsApi.AzureFunctions.Models;

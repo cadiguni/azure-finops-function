@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Text.Json;
 using Azure.Storage.Blobs;
 using Microsoft.Extensions.Configuration;
@@ -56,7 +56,7 @@ public class FinOpsResultAggregator
         {
             _logger.LogInformation("💾 Processando resultado FinOps: {analysisId}", result.AnalysisId);
 
-            // 🎯 Nova estrutura: analyses/year=YYYY/month=MM/day=DD/subscription=XXX/raw-analysis.json
+            // 🎯 Nova estrutura: analyses/year=YYYY/month=MM/day=DD/XXX/raw-analysis.json
             var blobName = BlobPathBuilder.BuildAnalysisPath(
                 result.ExecutedAt,
                 result.SubscriptionId,

@@ -1,4 +1,4 @@
-﻿using Azure.ResourceManager;
+using Azure.ResourceManager;
 using Azure.ResourceManager.Resources;
 using Azure.Identity;
 using Microsoft.Extensions.Logging;
@@ -18,6 +18,16 @@ namespace Personal.FinOpsApi.AzureFunctions.Analyzers
             _armClient = new ArmClient(credential);
         }
 
+        /// <summary>
+        /// 🔍 ANÁLISE DE DUPLICATAS: Detecta recursos com nomes idênticos DENTRO DA MESMA SUBSCRIPTION
+        /// 
+        /// ⚠️ IMPORTANTE: Recursos com mesmo nome em subscriptions DIFERENTES são considerados VÁLIDOS
+        /// 🎯 ESCOPO: Apenas intra-subscription (recursos duplicados na mesma subscription)
+        /// 
+        /// Exemplos:
+        /// ✅ VÁLIDO: vm-web01 em Sub-A e vm-web01 em Sub-B (subscriptions diferentes)
+        /// ❌ DUPLICATA: vm-web01 e vm-web01 na mesma Sub-A (mesma subscription)
+        /// </summary>
         public async Task<List<DuplicateResourceGroup>> AnalyzeDuplicatesAcrossSubscriptionsAsync(
             List<string> subscriptionIds)
         {
@@ -41,25 +51,39 @@ namespace Personal.FinOpsApi.AzureFunctions.Analyzers
                 }
             }
 
-            // Opção A: Agrupar por nome + tipo (mais simples e eficaz)
+            // 🎯 CORREÇÃO: Agrupar APENAS dentro da mesma subscription (recursos com mesmo nome em subscriptions diferentes SÃO VÁLIDOS)
             var resourceGroups = allResources
-                .GroupBy(r => new { r.Name, r.Type })
-                .Where(g => g.Count() > 1)
+                .GroupBy(r => new { r.Name, r.Type, r.SubscriptionId }) // ✅ INCLUIR SubscriptionId no agrupamento
+                .Where(g => g.Count() > 1) // Apenas grupos com 2+ recursos NA MESMA subscription
                 .ToList();
+
+            _logger.LogInformation("🔍 Agrupamento por Nome+Tipo+Subscription: {GroupCount} grupos encontrados", resourceGroups.Count);
 
             foreach (var group in resourceGroups)
             {
+                // 🔍 VALIDAÇÃO: Confirmar que todos os recursos estão na mesma subscription
+                var subscriptions = group.Select(r => r.SubscriptionId).Distinct().ToList();
+                if (subscriptions.Count > 1)
+                {
+                    _logger.LogWarning("⚠️ INCONSISTÊNCIA: Grupo {Name}:{Type} span múltiplas subscriptions: {Subs}", 
+                        group.Key.Name, group.Key.Type, string.Join(", ", subscriptions));
+                    continue; // Pular este grupo inconsistente
+                }
+
                 var duplicateGroup = new DuplicateResourceGroup
                 {
                     Name = group.Key.Name,
                     ResourceType = group.Key.Type,
                     Count = group.Count(),
                     Resources = group.ToList(),
-                    SimilarityScore = 1.0, // 100% match para nome + tipo idênticos
+                    SimilarityScore = 1.0, // 100% match para nome + tipo idênticos NA MESMA subscription
                     PotentialSavings = await EstimatePotentialSavingsAsync(group.ToList())
                 };
 
                 duplicateGroups.Add(duplicateGroup);
+                
+                _logger.LogInformation("📦 Duplicatas encontradas: {Name} ({Type}) - {Count} recursos na subscription {Sub}", 
+                    group.Key.Name, group.Key.Type, group.Count(), subscriptions[0]);
             }
 
             _logger.LogInformation("✅ Encontrados {Count} grupos de recursos duplicados", duplicateGroups.Count);

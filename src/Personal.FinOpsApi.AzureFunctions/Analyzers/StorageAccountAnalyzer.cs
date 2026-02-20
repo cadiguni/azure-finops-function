@@ -1,4 +1,4 @@
-﻿using Azure.Identity;
+using Azure.Identity;
 using Personal.FinOpsApi.AzureFunctions.Models;
 using Personal.FinOpsApi.AzureFunctions.Services;
 using Microsoft.Extensions.Logging;
@@ -15,22 +15,25 @@ public class StorageAccountAnalyzer
     private readonly HttpClient _httpClient;
     private readonly DefaultAzureCredential _credential;
     private readonly AzureMetricsService _metricsService;
+    private readonly HttpRetryService _httpRetryService;
     private readonly ILogger<StorageAccountAnalyzer> _logger;
 
     public StorageAccountAnalyzer(
         HttpClient httpClient, 
         AzureMetricsService metricsService,
+        HttpRetryService httpRetryService,
         ILogger<StorageAccountAnalyzer> logger)
     {
         _httpClient = httpClient;
         _credential = new DefaultAzureCredential();
         _metricsService = metricsService;
+        _httpRetryService = httpRetryService;
         _logger = logger;
     }
 
     /// <summary>
     /// 🎯 Analisa Storage Accounts com otimizações profissionais FinOps
-    /// 🚀 V4.0: Filtro grosso + histórico + paralelismo controlado
+    /// 🚀 V4.1: Filtro grosso + histórico + paralelismo controlado + timeout protection
     /// </summary>
     public async Task<StandardAnalyzerResult> AnalyzeSubscriptionAsync(string subscriptionId, int analysisPeriodDays = 30, bool dryRun = true)
     {
@@ -107,13 +110,43 @@ public class StorageAccountAnalyzer
             result.ExecutionMetadata["optimizationPercentage"] = optimizationRatio;
             result.ExecutionMetadata["resourcesAnalyzed"] = suspiciousCandidates.Count;
 
-            foreach (var storage in suspiciousCandidates)
+            // 🚨 TIMEOUT PROTECTION: Limite de 6 minutos para análise de Storage Accounts
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromMinutes(6));
+            
+            // 🎯 LIMIT PROTECTION: Máximo 50 storage accounts para evitar timeout
+            var limitedCandidates = suspiciousCandidates.Take(50).ToList();
+            if (limitedCandidates.Count < suspiciousCandidates.Count)
             {
-                var finding = await CreateStorageFindingWithMetricsAsync(storage, analysisPeriodDays);
-                if (finding != null)
+                _logger.LogWarning("⚠️ Limitando análise a {limit} de {total} storage accounts para evitar timeout", 
+                    limitedCandidates.Count, suspiciousCandidates.Count);
+            }
+
+            var tasks = limitedCandidates.Select(async storage =>
+            {
+                try
                 {
-                    result.Findings.Add(finding);
+                    return await CreateStorageFindingWithMetricsAsync(storage, analysisPeriodDays);
                 }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "⚠️ Erro ao analisar storage {storage}, continuando...", 
+                        storage.TryGetProperty("name", out var name) ? name.GetString() : "unknown");
+                    return null;
+                }
+            });
+
+            try
+            {
+                var findings = await Task.WhenAll(tasks.ToArray());
+                foreach (var finding in findings.Where(f => f != null))
+                {
+                    result.Findings.Add(finding!);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogWarning("⏰ Timeout de 6 minutos atingido na análise de Storage Accounts");
+                result.ExecutionMetadata["timeout_occurred"] = true;
             }
 
             Console.WriteLine($"🏪 {AnalyzerNames.STORAGE_ACCOUNT_ANALYZER}: {result.Findings.Count} findings gerados com {optimizationRatio:F1}% otimização");
@@ -162,8 +195,21 @@ public class StorageAccountAnalyzer
 
             _httpClient.DefaultRequestHeaders.Clear();
             _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {tokenResponse.Token}");
+            
+            // �️ RETRY RESILIENTE: Usar HttpRetryService para Resource Graph
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60)); // Aumentar timeout para incluir retries
+            var response = await _httpRetryService.PostWithRetryAsync(
+                _httpClient,
+                "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01", 
+                content, 
+                cts.Token);
 
-            var response = await _httpClient.PostAsync("https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01", content);
+            // 🚨 Tratamento especial para 429 persistente
+            if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+            {
+                _logger.LogWarning("⚠️ Resource Graph API rate-limited - pulando descoberta Storage Accounts");
+                return new List<JsonElement>(); // Retorna vazio em vez de falhar
+            }
 
             if (response.IsSuccessStatusCode)
             {

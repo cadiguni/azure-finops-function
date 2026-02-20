@@ -1,4 +1,4 @@
-﻿using Personal.FinOpsApi.AzureFunctions.Models;
+using Personal.FinOpsApi.AzureFunctions.Models;
 
 namespace Personal.FinOpsApi.AzureFunctions.Services;
 

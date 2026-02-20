@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using Azure.Identity;
 using Microsoft.Extensions.Logging;
 using Personal.FinOpsApi.AzureFunctions.Models;
@@ -15,6 +15,7 @@ public class AppServiceAnalyzer
     private readonly HttpClient _httpClient;
     private readonly DefaultAzureCredential _credential;
     private readonly AzureMetricsService _metricsService;
+    private readonly HttpRetryService _httpRetryService;
     private readonly ILogger<AppServiceAnalyzer> _logger;
 
     // 💰 Tabela de preços aproximados (ordem de grandeza para FinOps) em BRL
@@ -36,11 +37,13 @@ public class AppServiceAnalyzer
     public AppServiceAnalyzer(
         HttpClient httpClient, 
         AzureMetricsService metricsService,
+        HttpRetryService httpRetryService,
         ILogger<AppServiceAnalyzer> logger)
     {
         _httpClient = httpClient;
         _credential = new DefaultAzureCredential();
         _metricsService = metricsService;
+        _httpRetryService = httpRetryService;
         _logger = logger;
     }
 
@@ -87,9 +90,18 @@ public class AppServiceAnalyzer
             _httpClient.DefaultRequestHeaders.Clear();
             _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {token.Token}");
 
-            var response = await _httpClient.PostAsync(
+            // 🛡️ Usar retry resiliente em vez de call direto
+            var response = await _httpRetryService.PostWithRetryAsync(
+                _httpClient,
                 "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01",
                 content);
+
+            // 🚨 Tratamento especial para 429 persistente
+            if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+            {
+                _logger.LogWarning("⚠️ Resource Graph API ainda rate-limited após retries - pulando análise");
+                return new StandardAnalyzerResult(); // Retorna vazio em vez de falhar
+            }
 
             response.EnsureSuccessStatusCode();
             var jsonResponse = await response.Content.ReadAsStringAsync();
