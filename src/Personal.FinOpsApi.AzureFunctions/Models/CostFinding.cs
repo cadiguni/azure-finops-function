@@ -26,6 +26,9 @@ public class CostFinding
     [JsonPropertyName("estimatedMonthlyCost")]
     public decimal EstimatedMonthlyCost { get; set; }
 
+    [JsonPropertyName("dailyCost")]
+    public decimal DailyCost { get; set; }
+
     [JsonPropertyName("potentialSavings")]
     public decimal PotentialSavings { get; set; }
 

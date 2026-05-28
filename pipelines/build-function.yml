@@ -2,9 +2,9 @@ trigger: none
 
 variables:
   - template: config.yml
-  - group: FinOps-func-Personal
+  - group: FinOps-func-Portfolio
 
-pool: azp-personal-full-01
+pool: self-hosted-agent-pool
 
 stages:
   - stage: 'Build_function'

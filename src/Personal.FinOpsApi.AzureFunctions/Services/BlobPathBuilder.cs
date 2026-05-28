@@ -1,7 +1,7 @@
 namespace Personal.FinOpsApi.AzureFunctions.Services;
 
 /// <summary>
-/// 🎯 CENTRALIZADOR DE PATHS - FASE B ATUALIZADA
+///  CENTRALIZADOR DE PATHS - FASE B ATUALIZADA
 /// Responsável por gerar paths consistentes para Blob Storage
 /// Estrutura separada:
 /// - analyses/: raw-analysis.json e recommendations.json

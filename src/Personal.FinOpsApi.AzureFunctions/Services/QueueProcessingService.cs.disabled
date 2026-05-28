@@ -6,14 +6,14 @@ using System.Text.Json;
 namespace Personal.FinOpsApi.AzureFunctions.Services;
 
 /// <summary>
-/// 🚀 QUEUE-BASED PROCESSING - Arquitetura Enterprise FinOps
+///  QUEUE-BASED PROCESSING - Arquitetura Enterprise FinOps
 /// 
 /// Timer → Queue Storage (1 msg/subscription) → Function Queue Trigger → Analyzer
 /// 
-/// ✅ Paralelismo automático
-/// ✅ Escala horizontal  
-/// ✅ Muito mais barato
-/// ✅ Resiliente a falhas
+///  Paralelismo automático
+///  Escala horizontal  
+///  Muito mais barato
+///  Resiliente a falhas
 /// </summary>
 public class QueueProcessingService
 {
@@ -21,7 +21,7 @@ public class QueueProcessingService
     private readonly IConfiguration _configuration;
     private readonly ILogger<QueueProcessingService> _logger;
     
-    // 📊 Queue Names
+    //  Queue Names
     private const string SUBSCRIPTION_ANALYSIS_QUEUE = "subscription-analysis";
     private const string STORAGE_ANALYSIS_QUEUE = "storage-analysis";
     private const string VM_ANALYSIS_QUEUE = "vm-analysis";
@@ -38,7 +38,7 @@ public class QueueProcessingService
     }
 
     /// <summary>
-    /// 🎯 Enfileira análises por subscription para processamento paralelo
+    ///  Enfileira análises por subscription para processamento paralelo
     /// </summary>
     public async Task EnqueueSubscriptionAnalysisAsync(List<string> subscriptionIds, string analysisType)
     {
@@ -70,12 +70,12 @@ public class QueueProcessingService
             enqueuedCount++;
         }
 
-        _logger.LogInformation("🚀 Enfileiradas {count} análises de {type} para processamento paralelo", 
+        _logger.LogInformation(" Enfileiradas {count} análises de {type} para processamento paralelo", 
             enqueuedCount, analysisType);
     }
 
     /// <summary>
-    /// 📅 Enfileira análises diárias (leves - Resource Graph only)
+    ///  Enfileira análises diárias (leves - Resource Graph only)
     /// </summary>
     public async Task EnqueueDailyAnalysisAsync(List<string> subscriptionIds)
     {
@@ -88,7 +88,7 @@ public class QueueProcessingService
     }
 
     /// <summary>
-    /// 📊 Enfileira análises 2x semana (pesadas - Azure Monitor)
+    ///  Enfileira análises 2x semana (pesadas - Azure Monitor)
     /// </summary>
     public async Task EnqueueBiWeeklyAnalysisAsync(List<string> subscriptionIds)
     {
@@ -96,20 +96,20 @@ public class QueueProcessingService
         
         foreach (var analysisType in biWeeklyAnalysisTypes)
         {
-            // ✅ Feature Flag Check
+            //  Feature Flag Check
             if (IsAnalyzerEnabled(analysisType))
             {
                 await EnqueueSubscriptionAnalysisAsync(subscriptionIds, analysisType);
             }
             else
             {
-                _logger.LogInformation("⚪ Analyzer {type} desabilitado via feature flag", analysisType);
+                _logger.LogInformation(" Analyzer {type} desabilitado via feature flag", analysisType);
             }
         }
     }
 
     /// <summary>
-    /// 🎚️ Feature Flags - Habilitar/Desabilitar analyzers via configuração
+    ///  Feature Flags - Habilitar/Desabilitar analyzers via configuração
     /// </summary>
     private bool IsAnalyzerEnabled(string analysisType)
     {
@@ -125,7 +125,7 @@ public class QueueProcessingService
     }
 
     /// <summary>
-    /// 📈 Define prioridade baseada no impacto financeiro
+    ///  Define prioridade baseada no impacto financeiro
     /// </summary>
     private int GetPriority(string analysisType)
     {
@@ -140,7 +140,7 @@ public class QueueProcessingService
 }
 
 /// <summary>
-/// 📋 Mensagem para processamento de subscription via queue
+///  Mensagem para processamento de subscription via queue
 /// </summary>
 public class SubscriptionAnalysisMessage
 {

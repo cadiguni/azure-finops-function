@@ -1,0 +1,89 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
+    
+    "_comment_env": "==========  CONFIGURAÇÃO DE AMBIENTE ==========",
+    "ENVIRONMENT": "Development",
+    "_comment_env_note": "Development = testes rápidos | Production = frequências reais",
+    
+    "_comment_cron": "========== ⏱ AGENDAMENTOS ==========",
+    "CostAnalysisSchedule": "0 0 3 * * *",
+    "DailySummarySchedule": "0 0 6 * * *",
+    "_comment_cron_dev": " DEV/PROD: diário para reduzir custo operacional",
+    "_comment_cron_prod": " PROD Azure Settings: CostAnalysisSchedule=0 0 3 * * * | DailySummarySchedule=0 0 6 * * *",
+    
+    "_comment_azure": "==========  AZURE CONFIGURATION ==========",
+    "AZURE_SUBSCRIPTION_ID": "<YOUR_SUBSCRIPTION_ID>",
+    "RESULTS_CONTAINER_NAME": "finops-analysis",
+    "ENABLE_RAW_ANALYSIS_STORAGE": "false",
+    "ENABLE_SUMMARY_STORAGE": "false",
+    
+    "_comment_finops": "==========  FINOPS STRATEGY ==========",
+    "_comment_daily": " DIÁRIO: PublicIP, Discos, VMs (Resource Graph only)",
+    "_comment_biweekly": " 2x SEMANA: Storage + App Service + VM Idle (com Azure Monitor)",
+    "_comment_days": " 2x semana = Terça-feira e Sexta-feira às 3:00 AM UTC",
+    "_comment_optimization": " Otimização: 80-90% menos chamadas Azure Monitor + TIMEOUT PROTECTION",
+    "_comment_timeout": "⏰ TIMEOUT: Reduções para evitar 10min limit do Azure",
+    
+    "_comment_loganalytics": "==========  LOG ANALYTICS (Data Collector API) ==========",
+    "LOG_ANALYTICS_WORKSPACE_ID": "<YOUR_LOG_ANALYTICS_WORKSPACE_ID>",
+    "LOG_ANALYTICS_SHARED_KEY": "<YOUR_LOG_ANALYTICS_SHARED_KEY>",
+    "LOG_ANALYTICS_LOG_TYPE": "FinOpsRecommendations",
+    "_comment_loganalytics_note": " Opção A (Data Collector API) - Mais simples que DCR/DCE",
+    "_comment_loganalytics_table": " Tabela será criada automaticamente: FinOpsRecommendations_CL",
+    
+    "_comment_production": "==========  PRODUCTION QUEUE CONFIGURATION ==========",
+    "PRODUCTION_SUBSCRIPTION_ID": "<YOUR_PRODUCTION_SUBSCRIPTION_ID>",
+    "QUEUE_SUBSCRIPTION_ANALYSIS_PROD": "subscription-analysis-production",
+    "QUEUE_COST_BY_RESOURCE_STARTER": "cost-by-resource-starter",
+    "QUEUE_COST_BY_RESOURCE": "cost-by-resource-analysis",
+    "ENABLE_QUEUE_PROCESSING": "true",
+    "_comment_production_note": " Subscription de produção vai para queue exclusiva com throttling otimizado",
+    
+    "_comment_limits": "==========  TIMEOUT LIMITS ==========",
+    "MaxStorageAccountsPerAnalysis": "30",
+    "MaxVmsPerAnalysis": "20", 
+    "MaxAppServicesPerAnalysis": "15",
+    "_comment_limits_note": " Limites para evitar timeout de 10 minutos no Azure",
+    
+    "_comment_features": "==========  FEATURE FLAGS ==========",
+    "EnableStorageAnalyzer": true,
+    "EnableVmAnalyzer": true, 
+    "EnableAppServiceAnalyzer": true,
+    "EnablePublicIpAnalyzer": true,
+    "EnableDiskAnalyzer": true,
+    "_comment_features_note": " Habilitar/Desabilitar analyzers individualmente",
+
+    "_comment_cost_service": "==========  COST BY SERVICE ==========",
+    "CostByServiceDailySchedule": "0 10 9 * * *",
+    "CostByResourceDailySchedule": "0 20 9 * * *",
+    "COST_SUBSCRIPTIONS": "<YOUR_SUBSCRIPTION_ID>,<YOUR_PRODUCTION_SUBSCRIPTION_ID>",
+    "COST_RESOURCE_SERVICE": "Azure App Service",
+    "COST_STORAGE_CONTAINER": "finops-analysis",
+
+    "_comment_anomaly": "==========  COST ANOMALY DETECTION ==========",
+    "EnableCostAnomalyAnalysis": "true",
+    "CostAnomalyStorageContainer": "finops-analysis",
+    "CostAnomalyExcludedSubscriptions": "<SUBSCRIPTION_ID_1>,<SUBSCRIPTION_ID_2>",
+    "CostAnomalySchedule": "0 0 11 * * *",
+    "CostAnomalyMonthlyBudget": "860",
+    "CostAnomalyBaselineDays": "3",
+    "CostAnomalyMinimumIncreaseAmount": "10",
+    "CostAnomalyMediumPercent": "30",
+    "CostAnomalyHighPercent": "60",
+    "CostAnomalyCriticalPercent": "100",
+    "_comment_anomaly_note": " Detecta variações de custo diário vs histórico e vs budget",
+
+    "_comment_report": "==========  REPORT PRE-GENERATION ==========",
+    "ReportGenerationSchedule": "0 0 12 * * *",
+    "ReportGenerationDateOffsetDays": "0",
+    "_comment_report_note": " Gera HTML pré-renderizado após anomalias e summary estarem prontos"
+  },
+  "Host": {
+    "LocalHttpPort": 7071,
+    "CORS": "*",
+    "CORSCredentials": false
+  }
+}

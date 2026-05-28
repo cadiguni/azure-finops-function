@@ -1,7 +1,7 @@
 namespace Personal.FinOpsApi.AzureFunctions.Services;
 
 /// <summary>
-/// 🚨 Exception para rate limiting (429 Too Many Requests)
+///  Exception para rate limiting (429 Too Many Requests)
 /// Usado para identificar quando reagendar mensagem em vez de falhar
 /// </summary>
 public class RateLimitedException : Exception

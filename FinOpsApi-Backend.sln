@@ -1,10 +1,14 @@
-﻿Microsoft Visual Studio Solution File, Format Version 12.00
+Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.5.002.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{C8A7EE67-2B7E-4EDF-963E-D2EB6B2519B6}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Personal.FinOpsApi.AzureFunctions", "src\Personal.FinOpsApi.AzureFunctions\Personal.FinOpsApi.AzureFunctions.csproj", "{52AEB5F9-2AD5-416F-8F79-F881E00BAC14}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{965EC8D0-3916-4F70-8778-E46A19EF9F27}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Personal.FinOpsApi.AzureFunctions.UnitTests", "tests\Unit\Personal.FinOpsApi.AzureFunctions.UnitTests.csproj", "{2BFEA501-9B8F-4A45-9F7C-98A5B093A32B}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -16,11 +20,16 @@ Global
 		{52AEB5F9-2AD5-416F-8F79-F881E00BAC14}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{52AEB5F9-2AD5-416F-8F79-F881E00BAC14}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{52AEB5F9-2AD5-416F-8F79-F881E00BAC14}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2BFEA501-9B8F-4A45-9F7C-98A5B093A32B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2BFEA501-9B8F-4A45-9F7C-98A5B093A32B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2BFEA501-9B8F-4A45-9F7C-98A5B093A32B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2BFEA501-9B8F-4A45-9F7C-98A5B093A32B}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{52AEB5F9-2AD5-416F-8F79-F881E00BAC14} = {C8A7EE67-2B7E-4EDF-963E-D2EB6B2519B6}
+		{2BFEA501-9B8F-4A45-9F7C-98A5B093A32B} = {965EC8D0-3916-4F70-8778-E46A19EF9F27}
 	EndGlobalSection
 EndGlobal

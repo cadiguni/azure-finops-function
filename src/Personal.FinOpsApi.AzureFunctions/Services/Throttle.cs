@@ -3,7 +3,7 @@ using System.Collections.Concurrent;
 namespace Personal.FinOpsApi.AzureFunctions.Services;
 
 /// <summary>
-/// 🚦 Classe para limitar concorrência e evitar 429 "Too Many Requests"
+///  Classe para limitar concorrência e evitar 429 "Too Many Requests"
 /// Substitui Task.WhenAll por execução throttled com SemaphoreSlim
 /// </summary>
 public static class Throttle

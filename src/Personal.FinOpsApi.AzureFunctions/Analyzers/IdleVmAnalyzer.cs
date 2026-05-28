@@ -8,7 +8,7 @@ namespace Personal.FinOpsApi.AzureFunctions.Analyzers;
 
 /// <summary>
 /// Analyzer para detectar VMs ligadas mas ociosas (idle)
-/// ✨ V2.0: Agora usa MÉTRICAS REAIS do Azure Monitor
+///  V2.0: Agora usa MÉTRICAS REAIS do Azure Monitor
 /// Maior impacto financeiro na plataforma FinOps
 /// </summary>
 public class IdleVmAnalyzer
@@ -16,16 +16,19 @@ public class IdleVmAnalyzer
     private readonly HttpClient _httpClient;
     private readonly DefaultAzureCredential _credential;
     private readonly AzureMetricsService _metricsService;
+    private readonly ResourceCostLookupService _costLookupService;
     private readonly ILogger<IdleVmAnalyzer> _logger;
 
     public IdleVmAnalyzer(
         HttpClient httpClient, 
         AzureMetricsService metricsService,
+        ResourceCostLookupService costLookupService,
         ILogger<IdleVmAnalyzer> logger)
     {
         _httpClient = httpClient;
         _credential = new DefaultAzureCredential();
         _metricsService = metricsService;
+        _costLookupService = costLookupService;
         _logger = logger;
     }
 
@@ -39,7 +42,10 @@ public class IdleVmAnalyzer
 
         try
         {
-            _logger.LogInformation("💽 Token obtido com sucesso");
+            _logger.LogInformation(" Token obtido com sucesso");
+
+            // Pre-carregar custos do Cost Management para esta subscription
+            await _costLookupService.PreloadCostsAsync(subscriptionId);
 
             // Query KQL para encontrar VMs em execução
             var kqlQuery = $@"
@@ -83,7 +89,7 @@ public class IdleVmAnalyzer
 
             var runningVms = doc.RootElement.GetProperty("data").EnumerateArray().ToList();
 
-            _logger.LogInformation("🔍 Encontradas {count} VMs ociosas em execução", runningVms.Count);
+            _logger.LogInformation(" Encontradas {count} VMs ociosas em execução", runningVms.Count);
 
             foreach (var vm in runningVms)
             {
@@ -94,17 +100,34 @@ public class IdleVmAnalyzer
                 var vmSize = vm.GetProperty("vmSize").GetString() ?? "Standard_B1s";
                 var osType = vm.GetProperty("osType").GetString() ?? "Unknown";
 
-                // 🚀 Obter métricas REAIS do Azure Monitor
+                //  Obter métricas REAIS do Azure Monitor
                 var vmMetrics = await _metricsService.GetVmMetricsAsync(resourceId, analysisPeriodDays);
                 
                 var avgCpuUsage = vmMetrics.AvgCpuPercentage;
                 var totalNetworkGB = vmMetrics.TotalNetworkInGB + vmMetrics.TotalNetworkOutGB;
                 var avgNetworkGBPerDay = totalNetworkGB / analysisPeriodDays;
+                
+                // Memória (se disponível - requer Azure Monitor Agent ou VM Insights)
+                var memoryAvailable = vmMetrics.AvgAvailableMemoryGB >= 0;
+                var availableMemoryGB = vmMetrics.AvgAvailableMemoryGB;
 
-                // 🎯 Regra: VM é ociosa se CPU < 5% E trafego de rede < 0.1GB/dia
-                if (avgCpuUsage < 5.0 && avgNetworkGBPerDay < 0.1)
+                //  Regra: VM é ociosa se CPU < 5% E trafego de rede < 0.1GB/dia
+                // Se memória disponível estiver muito alta, também indica subutilização
+                var isIdle = avgCpuUsage < 5.0 && avgNetworkGBPerDay < 0.1;
+                
+                if (isIdle)
                 {
-                    var estimatedMonthlyCost = EstimateVmMonthlyCost(vmSize);
+                    // Construir descrição com memória se disponível
+                    var description = memoryAvailable && availableMemoryGB > 0
+                        ? $"VM '{name}' ({vmSize}) ociosa há {analysisPeriodDays} dias: CPU {avgCpuUsage:F1}%, Memória livre: {availableMemoryGB:F1}GB, Rede {avgNetworkGBPerDay:F2}GB/dia"
+                        : $"VM '{name}' ({vmSize}) ociosa há {analysisPeriodDays} dias: CPU {avgCpuUsage:F1}%, Rede {avgNetworkGBPerDay:F2}GB/dia";
+                    
+                    // 💰 CUSTO REAL: Buscar do Cost Management primeiro, fallback para tabela
+                    var costData = await _costLookupService.GetResourceCostDataAsync(subscriptionId, resourceId);
+                    var dailyCost = costData.DailyCost > 0 ? costData.DailyCost : EstimateVmMonthlyCostFallback(vmSize) / 30;
+                    var estimatedMonthlyCost = costData.MonthlyCost > 0 ? costData.MonthlyCost : EstimateVmMonthlyCostFallback(vmSize);
+                    var costSource = costData.MonthlyCost > 0 ? "cost-management" : "sku-fallback";
+                    
                     var monthlySavings = estimatedMonthlyCost * 0.85m; // 85% economia ao desligar
 
                     var finding = new StandardFinding
@@ -113,18 +136,19 @@ public class IdleVmAnalyzer
                         ResourceId = resourceId,
                         ResourceName = name,
                         ResourceType = "Microsoft.Compute/virtualMachines",
-                        ResourceGroup = resourceGroup,     // ✅ CORRIGIDO: Campo obrigatório
-                        Location = location,               // ✅ CORRIGIDO: Campo obrigatório
+                        ResourceGroup = resourceGroup,     //  CORRIGIDO: Campo obrigatório
+                        Location = location,               //  CORRIGIDO: Campo obrigatório
                         SubscriptionId = subscriptionId,
+                        DailyCost = dailyCost,
                         EstimatedMonthlyCost = estimatedMonthlyCost,
                         EstimatedMonthlySavings = monthlySavings,
                         Currency = "BRL",
                         Priority = estimatedMonthlyCost > 900 ? FindingPriorities.HIGH : 
                                   estimatedMonthlyCost > 300 ? FindingPriorities.MEDIUM : FindingPriorities.LOW,
                         Confidence = 0.8,
-                        Description = $"VM '{name}' ({vmSize}) ociosa há {analysisPeriodDays} dias: CPU {avgCpuUsage:F1}%, Rede {avgNetworkGBPerDay:F2}GB/dia",
-                        Recommendation = "Considere desligar a VM durante períodos de baixo uso ou redimensionar para um SKU menor.",
-                        Tags = ExtractTags(vm),            // ✅ CORRIGIDO: Campo no lugar certo
+                        Description = description,
+                        Recommendation = "Investigar uso da VM. Verificar se está ociosa ou se é necessária para processos batch/jobs. Avaliar desligamento em horários de baixo uso.",
+                        Tags = ExtractTags(vm),            //  CORRIGIDO: Campo no lugar certo
                         Metadata = new Dictionary<string, object>
                         {
                             ["vmSize"] = vmSize,
@@ -134,7 +158,11 @@ public class IdleVmAnalyzer
                             ["avgNetworkGBPerDay"] = Math.Round(avgNetworkGBPerDay, 3),
                             ["totalNetworkInGB"] = Math.Round(vmMetrics.TotalNetworkInGB, 3),
                             ["totalNetworkOutGB"] = Math.Round(vmMetrics.TotalNetworkOutGB, 3),
-                            ["metricsSource"] = "AzureMonitor" // 🚀 Métricas reais!
+                            ["memoryMetricAvailable"] = memoryAvailable,
+                            ["availableMemoryGB"] = memoryAvailable ? Math.Round(availableMemoryGB, 2) : -1,
+                            ["metricsSource"] = "AzureMonitor",
+                            ["costSource"] = costSource,
+                            ["realCostFromApi"] = costData.MonthlyCost
                         }
                     };
 
@@ -142,11 +170,11 @@ public class IdleVmAnalyzer
                 }
             }
 
-            _logger.LogInformation("✅ Análise VMs concluída: {count} VMs ociosas encontradas", findings.Count);
+            _logger.LogInformation(" Análise VMs concluída: {count} VMs ociosas encontradas", findings.Count);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Erro durante análise de VMs");
+            _logger.LogError(ex, " Erro durante análise de VMs");
         }
 
         var result = new StandardAnalyzerResult
@@ -171,15 +199,15 @@ public class IdleVmAnalyzer
         var (isValid, errors) = AnalyzerContractValidator.ValidateResult(result);
         if (!isValid)
         {
-            _logger.LogWarning("⚠️ Validação falhou: {errors}", string.Join(", ", errors));
+            _logger.LogWarning(" Validação falhou: {errors}", string.Join(", ", errors));
         }
         
         return result;
     }
 
-    private decimal EstimateVmMonthlyCost(string vmSize)
+    private decimal EstimateVmMonthlyCostFallback(string vmSize)
     {
-        // Preços aproximados por mês em BRL (730 horas)
+        // Preços aproximados por mês em BRL - FALLBACK quando Cost Management não retorna dados
         return vmSize.ToLower() switch
         {
             "standard_b1s" => 45.00m,

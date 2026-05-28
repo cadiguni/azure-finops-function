@@ -102,10 +102,10 @@ public class AnalyzerContractValidator
 
         if (isValid)
         {
-            return $"✅ CONTRATO VÁLIDO: {result.Analyzer} - {result.Findings.Count} findings";
+            return $" CONTRATO VÁLIDO: {result.Analyzer} - {result.Findings.Count} findings";
         }
 
-        var report = $"❌ CONTRATO INVÁLIDO: {result.Analyzer}\n";
+        var report = $" CONTRATO INVÁLIDO: {result.Analyzer}\n";
         report += "Erros encontrados:\n";
         foreach (var error in errors)
         {

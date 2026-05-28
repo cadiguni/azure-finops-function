@@ -7,8 +7,8 @@ using Microsoft.Extensions.Logging;
 namespace Personal.FinOpsApi.AzureFunctions.Services;
 
 /// <summary>
-/// 🧮 Serviço de métricas REAIS do Azure Monitor + Resource Graph
-/// 🚀 V3.0: Integração inteligente com controle de throttling e filtro grosso
+///  Serviço de métricas REAIS do Azure Monitor + Resource Graph
+///  V3.0: Integração inteligente com controle de throttling e filtro grosso
 /// </summary>
 public class AzureMetricsService
 {
@@ -16,7 +16,7 @@ public class AzureMetricsService
     private readonly ArmClient _armClient;
     private readonly ILogger<AzureMetricsService> _logger;
     
-    // 🚦 Controle de paralelismo para evitar throttling
+    //  Controle de paralelismo para evitar throttling
     private readonly SemaphoreSlim _semaphore = new(3, 3); // Máximo 3 chamadas simultâneas para evitar timeout
     
     public AzureMetricsService(
@@ -30,12 +30,12 @@ public class AzureMetricsService
     }
 
     /// <summary>
-    /// 📊 Busca CPU médio REAL do App Service Plan COM CONTROLE DE THROTTLING
-    /// 🎯 V4.0: Paralelismo controlado para evitar 429 Too Many Requests
+    ///  Busca CPU médio REAL do App Service Plan COM CONTROLE DE THROTTLING
+    ///  V4.0: Paralelismo controlado para evitar 429 Too Many Requests
     /// </summary>
     public async Task<double> GetAppServicePlanCpuAsync(string resourceId, int analysisPeriodDays = 30)
     {
-        await _semaphore.WaitAsync(); // 🚦 Controle de paralelismo
+        await _semaphore.WaitAsync(); //  Controle de paralelismo
         
         try
         {
@@ -43,23 +43,105 @@ public class AzureMetricsService
         }
         finally
         {
-            _semaphore.Release(); // ✅ Sempre libera o semáforo
+            _semaphore.Release(); //  Sempre libera o semáforo
         }
     }
     
     /// <summary>
-    /// 📊 Implementação interna do CPU com retry policy  
+    ///  Busca Memory % médio REAL do App Service Plan COM CONTROLE DE THROTTLING
+    ///  Métrica: MemoryPercentage do Azure Monitor
+    /// </summary>
+    public async Task<double> GetAppServicePlanMemoryAsync(string resourceId, int analysisPeriodDays = 30)
+    {
+        await _semaphore.WaitAsync();
+        
+        try
+        {
+            return await GetAppServicePlanMemoryInternalAsync(resourceId, analysisPeriodDays);
+        }
+        finally
+        {
+            _semaphore.Release();
+        }
+    }
+    
+    /// <summary>
+    ///  Implementação interna do Memory % com retry policy  
+    /// </summary>
+    private async Task<double> GetAppServicePlanMemoryInternalAsync(string resourceId, int analysisPeriodDays = 30)
+    {
+        try
+        {
+            _logger.LogDebug(" Buscando Memory % REAL para App Service Plan: {resourceId}", resourceId);
+
+            var endTime = DateTimeOffset.UtcNow;
+            var startTime = endTime.AddDays(-analysisPeriodDays);
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+            var response = await _metricsClient.QueryResourceAsync(
+                resourceId,
+                new[] { "MemoryPercentage" },
+                new MetricsQueryOptions
+                {
+                    TimeRange = new QueryTimeRange(startTime, endTime),
+                    Granularity = TimeSpan.FromHours(1)
+                },
+                cts.Token
+            );
+
+            if (response?.Value?.Metrics == null || !response.Value.Metrics.Any())
+            {
+                _logger.LogWarning(" Nenhuma métrica Memory % encontrada para {resourceId}", resourceId);
+                return -1.0; // -1 indica que a métrica não está disponível
+            }
+
+            var metric = response.Value.Metrics.First();
+            var validValues = new List<double>();
+
+            foreach (var timeSeries in metric.TimeSeries)
+            {
+                foreach (var value in timeSeries.Values)
+                {
+                    if (value.Average.HasValue)
+                    {
+                        validValues.Add(value.Average.Value);
+                    }
+                }
+            }
+
+            if (!validValues.Any())
+            {
+                _logger.LogWarning(" Nenhum valor válido de Memory % encontrado para {resourceId}", resourceId);
+                return -1.0;
+            }
+
+            var avgMemory = validValues.Average();
+            _logger.LogInformation(" Memory % REAL: {avgMemory:F1}% para {resourceId} (baseado em {count} pontos)", 
+                avgMemory, resourceId, validValues.Count);
+            
+            return avgMemory;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, " Erro ao buscar Memory % REAL para {resourceId} - métrica pode não estar disponível", resourceId);
+            return -1.0; // Métrica não disponível
+        }
+    }
+    
+    /// <summary>
+    ///  Implementação interna do CPU com retry policy  
     /// </summary>
     private async Task<double> GetAppServicePlanCpuInternalAsync(string resourceId, int analysisPeriodDays = 30)
     {
         try
         {
-            _logger.LogDebug("🔍 Buscando CPU REAL para App Service Plan: {resourceId}", resourceId);
+            _logger.LogDebug(" Buscando CPU REAL para App Service Plan: {resourceId}", resourceId);
 
             var endTime = DateTimeOffset.UtcNow;
             var startTime = endTime.AddDays(-analysisPeriodDays);
 
-            // 🚨 TIMEOUT PROTECTION: 30 segundos para query do Azure Monitor
+            //  TIMEOUT PROTECTION: 30 segundos para query do Azure Monitor
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
 
             var response = await _metricsClient.QueryResourceAsync(
@@ -75,7 +157,7 @@ public class AzureMetricsService
 
             if (response?.Value?.Metrics == null || !response.Value.Metrics.Any())
             {
-                _logger.LogWarning("⚠️ Nenhuma métrica CPU encontrada para {resourceId}", resourceId);
+                _logger.LogWarning(" Nenhuma métrica CPU encontrada para {resourceId}", resourceId);
                 return 0.0; // Sem dados = sem uso detectado
             }
 
@@ -95,51 +177,51 @@ public class AzureMetricsService
 
             if (!validValues.Any())
             {
-                _logger.LogWarning("⚠️ Nenhum valor válido de CPU encontrado para {resourceId}", resourceId);
+                _logger.LogWarning(" Nenhum valor válido de CPU encontrado para {resourceId}", resourceId);
                 return 0.0;
             }
 
             var avgCpu = validValues.Average();
-            _logger.LogInformation("📈 CPU REAL: {avgCpu:F1}% para {resourceId} (baseado em {count} pontos)", 
+            _logger.LogInformation(" CPU REAL: {avgCpu:F1}% para {resourceId} (baseado em {count} pontos)", 
                 avgCpu, resourceId, validValues.Count);
             
             return avgCpu;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Erro ao buscar CPU REAL para {resourceId} - usando fallback", resourceId);
+            _logger.LogError(ex, " Erro ao buscar CPU REAL para {resourceId} - usando fallback", resourceId);
             
             // Fallback: simulação como backup
             var hash = Math.Abs(resourceId.GetHashCode());
             var fallbackCpu = (hash % 18) + 2;
-            _logger.LogWarning("🔄 Usando CPU simulado: {fallbackCpu}% como fallback", fallbackCpu);
+            _logger.LogWarning(" Usando CPU simulado: {fallbackCpu}% como fallback", fallbackCpu);
             
             return fallbackCpu;
         }
     }
 
     /// <summary>
-    /// 🔍 Descobre Web Apps REAIS vinculados ao App Service Plan via Azure ARM
-    /// 🚀 V2.0: Implementação real usando Azure Resource Manager
+    ///  Descobre Web Apps REAIS vinculados ao App Service Plan via Azure ARM
+    ///  V2.0: Implementação real usando Azure Resource Manager
     /// </summary>
     public async Task<List<string>> GetWebAppsInPlanAsync(string appServicePlanResourceId)
     {
         try
         {
-            _logger.LogInformation("🔍 Descobrindo Web Apps REAIS para plan: {planId}", appServicePlanResourceId);
+            _logger.LogInformation(" Descobrindo Web Apps REAIS para plan: {planId}", appServicePlanResourceId);
 
-            // 📋 Extrair informações do resource ID do plan
+            //  Extrair informações do resource ID do plan
             var planId = new Azure.Core.ResourceIdentifier(appServicePlanResourceId);
             var subscriptionId = planId.SubscriptionId;
             var resourceGroupName = planId.ResourceGroupName;
 
             if (string.IsNullOrEmpty(subscriptionId) || string.IsNullOrEmpty(resourceGroupName))
             {
-                _logger.LogWarning("⚠️ Não foi possível extrair subscription/RG do plan ID: {planId}", appServicePlanResourceId);
+                _logger.LogWarning(" Não foi possível extrair subscription/RG do plan ID: {planId}", appServicePlanResourceId);
                 return new List<string>();
             }
 
-            // 🔍 Buscar Web Apps na subscription que usam este App Service Plan
+            //  Buscar Web Apps na subscription que usam este App Service Plan
             var subscription = await _armClient.GetSubscriptionResource(new Azure.Core.ResourceIdentifier($"/subscriptions/{subscriptionId}")).GetAsync();
             var webAppIds = new List<string>();
 
@@ -159,33 +241,33 @@ public class AzureMetricsService
                                 string.Equals(serverFarmId, appServicePlanResourceId, StringComparison.OrdinalIgnoreCase))
                             {
                                 webAppIds.Add(webAppData.Value.Id.ToString());
-                                _logger.LogDebug("✅ Web App encontrado: {name} ({id})", webAppData.Value.Data.Name, webAppData.Value.Id);
+                                _logger.LogDebug(" Web App encontrado: {name} ({id})", webAppData.Value.Data.Name, webAppData.Value.Id);
                             }
                         }
                         catch (Exception ex)
                         {
-                            _logger.LogDebug("⚠️ Erro ao verificar Web App {webAppName}: {error}", webApp.Id, ex.Message);
+                            _logger.LogDebug(" Erro ao verificar Web App {webAppName}: {error}", webApp.Id, ex.Message);
                         }
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogDebug("⚠️ Erro ao acessar RG {rgName}: {error}", resourceGroup.Id, ex.Message);
+                    _logger.LogDebug(" Erro ao acessar RG {rgName}: {error}", resourceGroup.Id, ex.Message);
                 }
             }
 
-            _logger.LogInformation("📊 Descobertos {count} Web Apps para o plan {planId}", webAppIds.Count, appServicePlanResourceId);
+            _logger.LogInformation(" Descobertos {count} Web Apps para o plan {planId}", webAppIds.Count, appServicePlanResourceId);
             
             if (webAppIds.Count == 0)
             {
-                _logger.LogWarning("⚠️ Nenhum Web App encontrado para o plan {planId} - pode estar órfão", appServicePlanResourceId);
+                _logger.LogWarning(" Nenhum Web App encontrado para o plan {planId} - pode estar órfão", appServicePlanResourceId);
             }
 
             return webAppIds;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Erro ao descobrir Web Apps para plan {planId} via ARM", appServicePlanResourceId);
+            _logger.LogError(ex, " Erro ao descobrir Web Apps para plan {planId} via ARM", appServicePlanResourceId);
             
             // Em caso de erro, retorna lista vazia (melhor que crashes)
             return new List<string>();
@@ -193,20 +275,20 @@ public class AzureMetricsService
     }
 
     /// <summary>
-    /// 📞 Busca requests REAIS de Web Apps COM CONTROLE DE THROTTLING  
-    /// 🚀 V4.0: Paralelismo controlado + retry com backoff
+    ///  Busca requests REAIS de Web Apps COM CONTROLE DE THROTTLING  
+    ///  V4.0: Paralelismo controlado + retry com backoff
     /// </summary>
     public async Task<int> GetTotalRequestsAsync(List<string> webAppResourceIds, int analysisPeriodDays = 30)
     {
         if (!webAppResourceIds.Any())
         {
-            _logger.LogInformation("📭 Nenhum Web App encontrado para o plan - provavelmente é um plan órfão");
-            _logger.LogInformation("💡 Plan órfão = 0 requests = subutilizado (correto)");
+            _logger.LogInformation(" Nenhum Web App encontrado para o plan - provavelmente é um plan órfão");
+            _logger.LogInformation(" Plan órfão = 0 requests = subutilizado (correto)");
             
             return 0; // Plan sem Web Apps = plan órfão = 0 requests
         }
 
-        await _semaphore.WaitAsync(); // 🚦 Controle de paralelismo
+        await _semaphore.WaitAsync(); //  Controle de paralelismo
         
         try
         {
@@ -214,12 +296,12 @@ public class AzureMetricsService
         }
         finally
         {
-            _semaphore.Release(); // ✅ Sempre libera o semáforo
+            _semaphore.Release(); //  Sempre libera o semáforo
         }
     }
 
     /// <summary>
-    /// 📞 Implementação interna dos requests com retry policy
+    ///  Implementação interna dos requests com retry policy
     /// </summary>
     private async Task<int> GetTotalRequestsInternalAsync(List<string> webAppResourceIds, int analysisPeriodDays = 30)
     {
@@ -234,9 +316,9 @@ public class AzureMetricsService
             {
                 try
                 {
-                    _logger.LogDebug("🔍 Buscando requests REAIS para Web App: {webAppId}", webAppId);
+                    _logger.LogDebug(" Buscando requests REAIS para Web App: {webAppId}", webAppId);
 
-                    // 🚨 TIMEOUT PROTECTION: 20 segundos por Web App
+                    //  TIMEOUT PROTECTION: 20 segundos por Web App
                     using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
 
                     var response = await _metricsClient.QueryResourceAsync(
@@ -267,7 +349,7 @@ public class AzureMetricsService
                         }
 
                         totalRequests += appRequests;
-                        _logger.LogDebug("📞 Requests REAIS para {webAppId}: {requests}", webAppId, appRequests);
+                        _logger.LogDebug(" Requests REAIS para {webAppId}: {requests}", webAppId, appRequests);
                     }
                     else
                     {
@@ -275,13 +357,13 @@ public class AzureMetricsService
                         var hash = Math.Abs(webAppId.GetHashCode());
                         var fallbackRequests = (hash % 300) + 10;
                         totalRequests += fallbackRequests;
-                        _logger.LogWarning("🔄 Usando requests simulados para {webAppId}: {requests} (sem dados reais)", 
+                        _logger.LogWarning(" Usando requests simulados para {webAppId}: {requests} (sem dados reais)", 
                             webAppId, fallbackRequests);
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "⚠️ Erro ao buscar requests para {webAppId} - usando fallback", webAppId);
+                    _logger.LogWarning(ex, " Erro ao buscar requests para {webAppId} - usando fallback", webAppId);
                     
                     // Fallback individual
                     var hash = Math.Abs(webAppId.GetHashCode());
@@ -294,14 +376,14 @@ public class AzureMetricsService
             var hoursInPeriod = analysisPeriodDays * 24;
             var avgRequestsPerHour = hoursInPeriod > 0 ? (int)(totalRequests / hoursInPeriod) : 0;
             
-            _logger.LogInformation("📊 Total requests REAIS: {totalRequests} em {days} dias = {avgPerHour}/h para {appCount} Web Apps", 
+            _logger.LogInformation(" Total requests REAIS: {totalRequests} em {days} dias = {avgPerHour}/h para {appCount} Web Apps", 
                 (int)totalRequests, analysisPeriodDays, avgRequestsPerHour, webAppResourceIds.Count);
 
             return avgRequestsPerHour;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Erro ao calcular requests REAIS - usando fallback");
+            _logger.LogError(ex, " Erro ao calcular requests REAIS - usando fallback");
             
             // Fallback geral
             var totalFallback = 0;
@@ -316,12 +398,12 @@ public class AzureMetricsService
     }
 
     /// <summary>
-    /// 📦 Busca métricas REAIS de Storage Account COM CONTROLE DE THROTTLING
-    /// 🎯 V4.0: Paralelismo controlado + retry com backoff para evitar 429
+    ///  Busca métricas REAIS de Storage Account COM CONTROLE DE THROTTLING
+    ///  V4.0: Paralelismo controlado + retry com backoff para evitar 429
     /// </summary>
     public async Task<StorageAccountMetrics> GetStorageAccountMetricsAsync(string resourceId, int analysisPeriodDays = 30)
     {
-        await _semaphore.WaitAsync(); // 🚦 Controle de paralelismo
+        await _semaphore.WaitAsync(); //  Controle de paralelismo
         
         try
         {
@@ -329,18 +411,18 @@ public class AzureMetricsService
         }
         finally
         {
-            _semaphore.Release(); // ✅ Sempre libera o semáforo
+            _semaphore.Release(); //  Sempre libera o semáforo
         }
     }
     
     /// <summary>
-    /// 📦 Implementação interna das métricas com retry policy
+    ///  Implementação interna das métricas com retry policy
     /// </summary>
     private async Task<StorageAccountMetrics> GetStorageAccountMetricsInternalAsync(string resourceId, int analysisPeriodDays = 30)
     {
         try
         {
-            _logger.LogInformation("📦 Buscando métricas REAIS para Storage Account: {resourceId}", resourceId);
+            _logger.LogInformation(" Buscando métricas REAIS para Storage Account: {resourceId}", resourceId);
 
             var endTime = DateTimeOffset.UtcNow;
             var startTime = endTime.AddDays(-analysisPeriodDays);
@@ -351,10 +433,10 @@ public class AzureMetricsService
                 AnalysisPeriodDays = analysisPeriodDays
             };
 
-            // 1. 📊 Transactions (número de operações)
+            // 1.  Transactions (número de operações)
             try
             {
-                // 🚨 TIMEOUT PROTECTION: 25 segundos para Transactions query
+                //  TIMEOUT PROTECTION: 25 segundos para Transactions query
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(25));
                 
                 var response = await _metricsClient.QueryResourceAsync(
@@ -387,13 +469,13 @@ public class AzureMetricsService
                     metrics.TotalTransactions = (long)totalTransactions;
                     metrics.AvgTransactionsPerDay = totalTransactions / analysisPeriodDays;
                     
-                    _logger.LogDebug("📊 Transactions REAIS: {total} em {days} dias = {avgPerDay}/dia", 
+                    _logger.LogDebug(" Transactions REAIS: {total} em {days} dias = {avgPerDay}/dia", 
                         metrics.TotalTransactions, analysisPeriodDays, metrics.AvgTransactionsPerDay);
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "⚠️ Erro ao buscar Transactions para {resourceId} - usando fallback", resourceId);
+                _logger.LogWarning(ex, " Erro ao buscar Transactions para {resourceId} - usando fallback", resourceId);
                 
                 // Fallback baseado no tamanho/tipo do storage
                 var fallbackTransactions = resourceId.ToLower().Contains("dev") ? 100 : 500;
@@ -401,16 +483,16 @@ public class AzureMetricsService
                 metrics.AvgTransactionsPerDay = fallbackTransactions / analysisPeriodDays;
             }
 
-            // 2. 💾 UsedCapacity (capacidade utilizada) - com múltiplas agregações
+            // 2.  UsedCapacity (capacidade utilizada) - com múltiplas agregações
             try
             {
-                // 🚨 TIMEOUT PROTECTION: 25 segundos para UsedCapacity query
+                //  TIMEOUT PROTECTION: 25 segundos para UsedCapacity query
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(25));
                 
                 var granularity = GetOptimalGranularity(analysisPeriodDays);
                 var timeRange = new QueryTimeRange(startTime, endTime);
                 
-                _logger.LogDebug("📊 Consultando UsedCapacity para {resource} com granularidade {granularity}", 
+                _logger.LogDebug(" Consultando UsedCapacity para {resource} com granularidade {granularity}", 
                     resourceId, granularity);
                 
                 var (capacityValue, aggregationType, dataPointCount) = await TryMultipleAggregationsAsync(
@@ -426,12 +508,12 @@ public class AzureMetricsService
                     metrics.AvgUsedCapacityBytes = capacityValue.Value;
                     metrics.AvgUsedCapacityGB = metrics.AvgUsedCapacityBytes / (1024 * 1024 * 1024);
                     
-                    _logger.LogInformation("✅ UsedCapacity obtida: {capacityGB:F2} GB usando {aggregation} ({dataPoints} pontos)", 
+                    _logger.LogInformation(" UsedCapacity obtida: {capacityGB:F2} GB usando {aggregation} ({dataPoints} pontos)", 
                         metrics.AvgUsedCapacityGB, aggregationType, dataPointCount);
                 }
                 else
                 {
-                    _logger.LogWarning("⚠️ UsedCapacity sem dados válidos após tentar múltiplas agregações - usando fallback");
+                    _logger.LogWarning(" UsedCapacity sem dados válidos após tentar múltiplas agregações - usando fallback");
                     
                     // Fallback: storage dev geralmente tem menos dados
                     var fallbackGB = resourceId.ToLower().Contains("dev") ? 0.5 : 2.0;
@@ -441,7 +523,7 @@ public class AzureMetricsService
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "⚠️ Erro ao buscar UsedCapacity para {resourceId} - usando fallback", resourceId);
+                _logger.LogWarning(ex, " Erro ao buscar UsedCapacity para {resourceId} - usando fallback", resourceId);
                 
                 // Fallback: storage dev geralmente tem menos dados
                 var fallbackGB = resourceId.ToLower().Contains("dev") ? 0.5 : 2.0;
@@ -449,10 +531,10 @@ public class AzureMetricsService
                 metrics.AvgUsedCapacityBytes = fallbackGB * 1024 * 1024 * 1024;
             }
 
-            // 3. 🌐 Ingress/Egress (transferência de dados)
+            // 3.  Ingress/Egress (transferência de dados)
             try
             {
-                // 🚨 TIMEOUT PROTECTION: 25 segundos para Ingress/Egress query
+                //  TIMEOUT PROTECTION: 25 segundos para Ingress/Egress query
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(25));
                 
                 var response = await _metricsClient.QueryResourceAsync(
@@ -494,13 +576,13 @@ public class AzureMetricsService
                         }
                     }
                     
-                    _logger.LogDebug("🌐 Transferência REAL: Ingress {ingressGB:F2}GB, Egress {egressGB:F2}GB", 
+                    _logger.LogDebug(" Transferência REAL: Ingress {ingressGB:F2}GB, Egress {egressGB:F2}GB", 
                         metrics.TotalIngressGB, metrics.TotalEgressGB);
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "⚠️ Erro ao buscar Ingress/Egress para {resourceId} - usando fallback", resourceId);
+                _logger.LogWarning(ex, " Erro ao buscar Ingress/Egress para {resourceId} - usando fallback", resourceId);
                 
                 // Fallback baseado no perfil do storage
                 var fallbackTraffic = resourceId.ToLower().Contains("dev") ? 0.1 : 1.0;
@@ -510,7 +592,7 @@ public class AzureMetricsService
                 metrics.TotalEgressBytes = fallbackTraffic * 1024 * 1024 * 1024;
             }
 
-            _logger.LogInformation("📦 Storage {resourceId} - Transactions: {transactions}/dia, Capacity: {capacityGB:F1}GB, Traffic: {trafficGB:F1}GB", 
+            _logger.LogInformation(" Storage {resourceId} - Transactions: {transactions}/dia, Capacity: {capacityGB:F1}GB, Traffic: {trafficGB:F1}GB", 
                 resourceId.Split('/').Last(), 
                 metrics.AvgTransactionsPerDay,
                 metrics.AvgUsedCapacityGB,
@@ -520,7 +602,7 @@ public class AzureMetricsService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Erro ao buscar métricas do Storage Account {resourceId}", resourceId);
+            _logger.LogError(ex, " Erro ao buscar métricas do Storage Account {resourceId}", resourceId);
             
             // Fallback completo
             return new StorageAccountMetrics
@@ -537,7 +619,7 @@ public class AzureMetricsService
     }
 
     /// <summary>
-    /// 🖥️ Obter métricas reais de VMs do Azure Monitor
+    ///  Obter métricas reais de VMs do Azure Monitor
     /// Métricas: CPU Percentage, Network In/Out
     /// </summary>
     public async Task<VmMetrics> GetVmMetricsAsync(string resourceId, int analysisPeriodDays = 7)
@@ -546,18 +628,20 @@ public class AzureMetricsService
         
         try
         {
-            _logger.LogDebug("🖥️ Obtendo métricas de VM: {resourceId}", resourceId);
+            _logger.LogDebug(" Obtendo métricas de VM: {resourceId}", resourceId);
             
             var endTime = DateTimeOffset.UtcNow;
             var startTime = endTime.AddDays(-analysisPeriodDays);
             var timespan = new QueryTimeRange(startTime, endTime);
             
             // Lista de métricas que queremos coletar
+            // Nota: "Available Memory Bytes" só funciona com Azure Monitor Agent ou VM Insights
             var metricsToQuery = new[]
             {
                 "Percentage CPU",           // Percentual de CPU
                 "Network In Total",        // Bytes de rede entrada
-                "Network Out Total"        // Bytes de rede saída
+                "Network Out Total",       // Bytes de rede saída
+                "Available Memory Bytes"   // Memória disponível (requer VM Insights/Azure Monitor Agent)
             };
 
             var results = new Dictionary<string, double>();
@@ -566,12 +650,12 @@ public class AzureMetricsService
             {
                 try
                 {
-                    // 🚨 TIMEOUT PROTECTION: 20 segundos por métrica de VM
+                    //  TIMEOUT PROTECTION: 20 segundos por métrica de VM
                     using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
                     
                     var granularity = GetOptimalGranularity((int)(timespan.End - timespan.Start).Value.TotalDays);
                     
-                    _logger.LogDebug("📊 Consultando {metric} para VM com granularidade {granularity}", 
+                    _logger.LogDebug(" Consultando {metric} para VM com granularidade {granularity}", 
                         metricName, granularity);
                     
                     var (metricValue, aggregationType, dataPointCount) = await TryMultipleAggregationsAsync(
@@ -585,28 +669,45 @@ public class AzureMetricsService
                     if (metricValue.HasValue)
                     {
                         results[metricName] = metricValue.Value;
-                        _logger.LogDebug("✅ {metric}: {value:F2} usando {aggregation} ({dataPoints} pontos)", 
+                        _logger.LogDebug(" {metric}: {value:F2} usando {aggregation} ({dataPoints} pontos)", 
                             metricName, metricValue.Value, aggregationType, dataPointCount);
                     }
                     else
                     {
                         results[metricName] = 0;
-                        _logger.LogWarning("⚠️ {metric}: sem dados após múltiplas agregações - usando 0", metricName);
+                        _logger.LogWarning(" {metric}: sem dados após múltiplas agregações - usando 0", metricName);
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning("⚠️ Falha ao obter métrica {metric} de VM {resourceId}: {error}", 
+                    _logger.LogWarning(" Falha ao obter métrica {metric} de VM {resourceId}: {error}", 
                         metricName, resourceId, ex.Message);
                     results[metricName] = 0; // Fallback: assume métrica zero
                 }
             }
 
+            // Calcular memória disponível em GB e percentual (estimativa baseada em VM sizes comuns)
+            var availableMemoryBytes = results.GetValueOrDefault("Available Memory Bytes", -1);
+            var availableMemoryGB = availableMemoryBytes > 0 ? availableMemoryBytes / (1024 * 1024 * 1024) : -1;
+            
+            // Se temos dados de memória disponível, estimar uso % (assumindo VM comum)
+            // Nota: sem saber o total de RAM da VM, usamos -1 para indicar "dados indisponíveis"
+            var memoryPercentage = -1.0;
+            if (availableMemoryGB > 0)
+            {
+                // Estimativa grosseira: se tem > 50% da RAM típica disponível, está subutilizada
+                // VMs comuns: B2s=4GB, D2s=8GB, D4s=16GB
+                // Isso é uma heurística - valor real dependeria de conhecer o tamanho total da VM
+                _logger.LogDebug(" VM {resourceId} - Memória disponível: {availableGB:F1}GB", resourceId, availableMemoryGB);
+            }
+            
             return new VmMetrics
             {
                 ResourceId = resourceId,
                 AnalysisPeriodDays = analysisPeriodDays,
                 AvgCpuPercentage = results.GetValueOrDefault("Percentage CPU", 0),
+                AvgMemoryPercentage = memoryPercentage,
+                AvgAvailableMemoryGB = availableMemoryGB,
                 TotalNetworkInBytes = results.GetValueOrDefault("Network In Total", 0),
                 TotalNetworkOutBytes = results.GetValueOrDefault("Network Out Total", 0),
                 TotalNetworkInGB = results.GetValueOrDefault("Network In Total", 0) / (1024 * 1024 * 1024),
@@ -615,14 +716,16 @@ public class AzureMetricsService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Erro geral ao obter métricas de VM {resourceId}", resourceId);
+            _logger.LogError(ex, " Erro geral ao obter métricas de VM {resourceId}", resourceId);
             
-            // 🚨 Fallback: Retornar métricas vazias para não quebrar a análise
+            //  Fallback: Retornar métricas vazias para não quebrar a análise
             return new VmMetrics
             {
                 ResourceId = resourceId,
                 AnalysisPeriodDays = analysisPeriodDays,
                 AvgCpuPercentage = 0,
+                AvgMemoryPercentage = -1,
+                AvgAvailableMemoryGB = -1,
                 TotalNetworkInBytes = 0,
                 TotalNetworkOutBytes = 0,
                 TotalNetworkInGB = 0,
@@ -636,7 +739,117 @@ public class AzureMetricsService
     }
 
     /// <summary>
-    /// 📊 Calcula granularidade dinâmica baseada no período
+    ///  Busca métricas de execução de Function Apps do Azure Monitor
+    /// Métricas: FunctionExecutionCount, FunctionExecutionUnits
+    /// </summary>
+    public async Task<FunctionAppExecutionMetrics> GetFunctionAppExecutionMetricsAsync(string resourceId, int analysisPeriodDays = 7)
+    {
+        await _semaphore.WaitAsync();
+        
+        try
+        {
+            _logger.LogDebug("📊 Obtendo métricas de execução de Function App: {resourceId}", resourceId);
+            
+            var endTime = DateTimeOffset.UtcNow;
+            var startTime = endTime.AddDays(-analysisPeriodDays);
+            var timeRange = new QueryTimeRange(startTime, endTime);
+            var granularity = GetOptimalGranularity(analysisPeriodDays);
+            
+            var metrics = new FunctionAppExecutionMetrics
+            {
+                ResourceId = resourceId,
+                AnalysisPeriodDays = analysisPeriodDays
+            };
+
+            // Métricas que queremos: FunctionExecutionCount, FunctionExecutionUnits
+            var metricsToQuery = new[] { "FunctionExecutionCount", "FunctionExecutionUnits" };
+            
+            foreach (var metricName in metricsToQuery)
+            {
+                try
+                {
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(25));
+                    
+                    var response = await _metricsClient.QueryResourceAsync(
+                        resourceId,
+                        new[] { metricName },
+                        new MetricsQueryOptions
+                        {
+                            TimeRange = timeRange,
+                            Granularity = granularity,
+                            Aggregations = { MetricAggregationType.Total }
+                        },
+                        cts.Token
+                    );
+
+                    if (response?.Value?.Metrics != null && response.Value.Metrics.Any())
+                    {
+                        var metric = response.Value.Metrics.First();
+                        var totalValue = 0.0;
+
+                        foreach (var timeSeries in metric.TimeSeries)
+                        {
+                            foreach (var value in timeSeries.Values)
+                            {
+                                if (value.Total.HasValue)
+                                {
+                                    totalValue += value.Total.Value;
+                                }
+                            }
+                        }
+
+                        if (metricName == "FunctionExecutionCount")
+                        {
+                            metrics.TotalExecutions = (long)totalValue;
+                            metrics.AvgExecutionsPerDay = totalValue / analysisPeriodDays;
+                            _logger.LogDebug("📊 FunctionExecutionCount: {total} ({avg}/dia)", 
+                                metrics.TotalExecutions, metrics.AvgExecutionsPerDay);
+                        }
+                        else if (metricName == "FunctionExecutionUnits")
+                        {
+                            metrics.TotalExecutionUnits = (long)totalValue;
+                            metrics.AvgExecutionUnitsPerDay = totalValue / analysisPeriodDays;
+                            _logger.LogDebug("📊 FunctionExecutionUnits: {total} ({avg}/dia)", 
+                                metrics.TotalExecutionUnits, metrics.AvgExecutionUnitsPerDay);
+                        }
+                    }
+                    else
+                    {
+                        _logger.LogDebug("⚠️ Nenhum dado para {metric} em {resourceId}", metricName, resourceId);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning("⚠️ Erro ao buscar {metric} para {resourceId}: {error}", 
+                        metricName, resourceId, ex.Message);
+                    // Continua com próxima métrica
+                }
+            }
+
+            return metrics;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "❌ Erro ao obter métricas de Function App {resourceId}", resourceId);
+            
+            return new FunctionAppExecutionMetrics
+            {
+                ResourceId = resourceId,
+                AnalysisPeriodDays = analysisPeriodDays,
+                TotalExecutions = 0,
+                AvgExecutionsPerDay = 0,
+                TotalExecutionUnits = 0,
+                AvgExecutionUnitsPerDay = 0
+            };
+        }
+        finally
+        {
+            _semaphore.Release();
+        }
+    }
+
+    /// <summary>
+    ///  Calcula granularidade dinâmica baseada no período
     /// 7 dias: PT1H, 30+ dias: PT6H
     /// </summary>
     private TimeSpan GetOptimalGranularity(int analysisPeriodDays)
@@ -650,7 +863,7 @@ public class AzureMetricsService
     }
 
     /// <summary>
-    /// 🎯 Tenta múltiplas agregações até encontrar dados: Maximum → Average → Minimum
+    ///  Tenta múltiplas agregações até encontrar dados: Maximum → Average → Minimum
     /// </summary>
     private async Task<(double? value, string aggregationType, int dataPointCount)> TryMultipleAggregationsAsync(
         string resourceId, 
@@ -720,7 +933,7 @@ public class AzureMetricsService
             }
             catch (Exception ex)
             {
-                _logger.LogDebug("⚠️ Falha na agregação {aggregation} para {resource}: {error}", 
+                _logger.LogDebug(" Falha na agregação {aggregation} para {resource}: {error}", 
                     typeName, resourceId, ex.Message);
             }
         }
@@ -730,7 +943,7 @@ public class AzureMetricsService
 }
 
 /// <summary>
-/// 🖥️ Métricas reais de VM coletadas do Azure Monitor
+///  Métricas reais de VM coletadas do Azure Monitor
 /// </summary>
 public class VmMetrics
 {
@@ -740,6 +953,10 @@ public class VmMetrics
     // CPU
     public double AvgCpuPercentage { get; set; }
     
+    // Memory (-1 = não disponível, requer Azure Monitor Agent/Diagnostics)
+    public double AvgMemoryPercentage { get; set; } = -1;
+    public double AvgAvailableMemoryGB { get; set; } = -1;
+    
     // Network
     public double TotalNetworkInBytes { get; set; }
     public double TotalNetworkInGB { get; set; }
@@ -748,7 +965,7 @@ public class VmMetrics
 }
 
 /// <summary>
-/// 📦 Métricas reais de Storage Account coletadas do Azure Monitor
+///  Métricas reais de Storage Account coletadas do Azure Monitor
 /// </summary>
 public class StorageAccountMetrics
 {
@@ -768,4 +985,24 @@ public class StorageAccountMetrics
     public double TotalIngressGB { get; set; }
     public double TotalEgressBytes { get; set; }
     public double TotalEgressGB { get; set; }
+}
+
+/// <summary>
+///  Métricas de execução de Function Apps coletadas do Azure Monitor
+/// </summary>
+public class FunctionAppExecutionMetrics
+{
+    public string ResourceId { get; set; } = "";
+    public int AnalysisPeriodDays { get; set; }
+    
+    // Execuções
+    public long TotalExecutions { get; set; }
+    public double AvgExecutionsPerDay { get; set; }
+    
+    // Unidades de execução (para cálculo de custo)
+    public long TotalExecutionUnits { get; set; }
+    public double AvgExecutionUnitsPerDay { get; set; }
+    
+    // Duração média das execuções (ms)
+    public double AvgExecutionDurationMs { get; set; }
 }

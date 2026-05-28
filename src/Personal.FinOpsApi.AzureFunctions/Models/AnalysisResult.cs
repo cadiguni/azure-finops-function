@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace Personal.FinOpsApi.AzureFunctions.Models;
 
 /// <summary>
-/// 📊 Modelo que representa o resultado completo de uma análise de custos
+///  Modelo que representa o resultado completo de uma análise de custos
 /// </summary>
 public class FullAnalysisResult
 {
@@ -36,7 +36,7 @@ public class FullAnalysisResult
 }
 
 /// <summary>
-/// 📈 Resumo da análise completa
+///  Resumo da análise completa
 /// </summary>
 public class FullAnalysisSummary
 {

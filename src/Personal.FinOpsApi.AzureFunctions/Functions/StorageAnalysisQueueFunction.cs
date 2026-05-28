@@ -8,9 +8,7 @@ using System.Text.Json;
 namespace Personal.FinOpsApi.AzureFunctions.Functions;
 
 /// <summary>
-/// 📦 STORAGE ANALYSIS QUEUE FUNCTION - Análise pesada via queue
-/// 🎯 TIMEOUT: 10 minutos para Storage Account analysis via Azure Monitor
-/// 🚀 PARALELISMO: Múltiplas instâncias processam subscriptions diferentes
+/// Processa analises de Storage Account via fila Service Bus.
 /// </summary>
 public class StorageAnalysisQueueFunction
 {
@@ -32,8 +30,7 @@ public class StorageAnalysisQueueFunction
     }
 
     /// <summary>
-    /// 📦 Processa análise de Storage Accounts via queue
-    /// 🚨 TIMEOUT: 10 minutos (configurado no Service Bus)
+    /// Processa mensagem da fila de analise de storage.
     /// </summary>
     [Function("StorageAnalysisQueue")]
     public async Task ProcessStorageAnalysis(
@@ -43,9 +40,9 @@ public class StorageAnalysisQueueFunction
         var messageId = message.MessageId;
         var startTime = DateTime.UtcNow;
         
-        _logger.LogInformation("📦 [STORAGE QUEUE] Iniciando análise - Message ID: {messageId}", messageId);
+        _logger.LogInformation("[STORAGE QUEUE] Iniciando analise - Message ID: {messageId}", messageId);
 
-        // 📋 Parse da mensagem - FORA do try interno para ser acessível nos catches
+        // Parse da mensagem fora do try interno para uso nos catches.
         StorageAnalysisRequest? analysisRequest = null;
         
         try
@@ -55,88 +52,87 @@ public class StorageAnalysisQueueFunction
             
             if (analysisRequest == null || string.IsNullOrEmpty(analysisRequest.SubscriptionId))
             {
-                _logger.LogError("❌ Mensagem inválida para Storage analysis");
+                _logger.LogError("Mensagem invalida para analise de storage");
                 throw new ArgumentException("Invalid storage analysis message format");
             }
 
             var subscriptionId = analysisRequest.SubscriptionId;
             
-            _logger.LogInformation("📦 [STORAGE QUEUE] Analisando Storage Accounts para subscription {subscriptionId}", subscriptionId);
+            _logger.LogInformation("[STORAGE QUEUE] Analisando Storage Accounts para subscription {subscriptionId}", subscriptionId);
 
-            // 🚨 TIMEOUT PROTECTION: 9 minutos (deixa margem para o Service Bus 10min)
+            // Timeout de 9 minutos para manter margem do limite total da fila.
             using var timeoutCancellation = new CancellationTokenSource(TimeSpan.FromMinutes(9));
 
-            // 🔍 EXECUTAR ANÁLISE REAL usando o analyzer existente
+            // Executa analise principal.
             var analysisResult = await ExecuteStorageAnalysisWithTimeoutAsync(subscriptionId, timeoutCancellation.Token);
 
             if (analysisResult != null)
             {
-                // 💾 Salvar resultados localmente
+                // Salva resultado localmente.
                 await SaveStorageAnalysisResultsAsync(analysisResult, subscriptionId, startTime);
 
-                // 📤 Enviar resultados para queue de consolidação  
+                // Envia resultado para fila de consolidacao.
                 await _queueService.SendAnalysisResultsAsync(analysisResult, "storage", subscriptionId);
 
                 var executionTime = DateTime.UtcNow - startTime;
-                _logger.LogInformation("✅ [STORAGE QUEUE] Análise concluída para {subscriptionId} - {findings} findings em {duration}ms", 
+                _logger.LogInformation("[STORAGE QUEUE] Analise concluida para {subscriptionId} - {findings} findings em {duration}ms", 
                     subscriptionId, analysisResult.Findings.Count, executionTime.TotalMilliseconds);
             }
             else
             {
-                _logger.LogWarning("⚠️ [STORAGE QUEUE] Análise retornou resultado nulo para {subscriptionId}", subscriptionId);
+                _logger.LogWarning("[STORAGE QUEUE] Analise retornou resultado nulo para {subscriptionId}", subscriptionId);
             }
         }
         catch (RateLimitedException ex)
         {
-            _logger.LogWarning("🚫 [STORAGE QUEUE] Rate limit detectado - reagendando mensagem: {error}", ex.Message);
+            _logger.LogWarning("[STORAGE QUEUE] Rate limit detectado - reagendando mensagem: {error}", ex.Message);
             if (analysisRequest != null) await RescheduleAsync(message, analysisRequest);
-            return; // ✅ IMPORTANTE: Não deixar exception estourar
+            return;
         }
         catch (HttpRequestException ex) when (ex.Message.Contains("429"))
         {
-            _logger.LogWarning("🚫 [STORAGE QUEUE] Rate limit HTTP 429 detectado - reagendando mensagem: {error}", ex.Message);
+            _logger.LogWarning("[STORAGE QUEUE] Rate limit HTTP 429 detectado - reagendando mensagem: {error}", ex.Message);
             if (analysisRequest != null) await RescheduleAsync(message, analysisRequest);
-            return; // ✅ IMPORTANTE: Não deixar exception estourar
+            return;
         }
         catch (TaskCanceledException ex)
         {
-            _logger.LogWarning("⏱️ [STORAGE QUEUE] Timeout detectado - reagendando mensagem: {error}", ex.Message);
+            _logger.LogWarning("[STORAGE QUEUE] Timeout detectado - reagendando mensagem: {error}", ex.Message);
             if (analysisRequest != null) await RescheduleAsync(message, analysisRequest);
-            return; // ✅ IMPORTANTE: Não deixar exception estourar
+            return;
         }
         catch (TimeoutException ex)
         {
-            _logger.LogWarning("⏱️ [STORAGE QUEUE] Timeout de operação - reagendando mensagem: {error}", ex.Message);
+            _logger.LogWarning("[STORAGE QUEUE] Timeout de operacao - reagendando mensagem: {error}", ex.Message);
             if (analysisRequest != null) await RescheduleAsync(message, analysisRequest);
-            return; // ✅ IMPORTANTE: Não deixar exception estourar
+            return;
         }
         catch (HttpRequestException ex) when (IsTransientError(ex))
         {
-            _logger.LogWarning("🔄 [STORAGE QUEUE] Erro transitório detectado - reagendando mensagem: {error}", ex.Message);
+            _logger.LogWarning("[STORAGE QUEUE] Erro transitorio detectado - reagendando mensagem: {error}", ex.Message);
             if (analysisRequest != null) await RescheduleAsync(message, analysisRequest);
-            return; // ✅ IMPORTANTE: Não deixar exception estourar
+            return;
         }
         catch (OperationCanceledException)
         {
             var executionTime = DateTime.UtcNow - startTime;
-            _logger.LogWarning("⏰ [STORAGE QUEUE] Timeout de 9 minutos atingido para message {messageId} após {duration}ms", 
+            _logger.LogWarning("[STORAGE QUEUE] Timeout de 9 minutos atingido para message {messageId} apos {duration}ms", 
                 messageId, executionTime.TotalMilliseconds);
             
-            // ❌ Re-throw para Service Bus marcar como falha e tentar retry (max 2x)
             throw;
         }
         catch (Exception ex)
         {
             var executionTime = DateTime.UtcNow - startTime;
-            _logger.LogError(ex, "❌ [STORAGE QUEUE] Erro na análise de Storage - Message ID: {messageId} após {duration}ms", 
+            _logger.LogError(ex, "[STORAGE QUEUE] Erro na analise de Storage - Message ID: {messageId} apos {duration}ms", 
                 messageId, executionTime.TotalMilliseconds);
             
-            throw; // Re-throw para Service Bus retry policy
+            throw;
         }
     }
 
     /// <summary>
-    /// 🔍 Executa análise de Storage com timeout protection
+    /// Executa analise de storage com timeout.
     /// </summary>
     private async Task<Models.StandardAnalyzerResult?> ExecuteStorageAnalysisWithTimeoutAsync(
         string subscriptionId, 
@@ -144,37 +140,35 @@ public class StorageAnalysisQueueFunction
     {
         try
         {
-            _logger.LogInformation("🔍 [STORAGE] Executando análise REAL com timeout protection para {subscriptionId}", subscriptionId);
+            _logger.LogInformation("[STORAGE] Executando analise com timeout para {subscriptionId}", subscriptionId);
 
-            // 📊 ANÁLISE REAL: Usar o StorageAccountAnalyzer existente (otimizado)
             var result = await _storageAnalyzer.AnalyzeSubscriptionAsync(
                 subscriptionId, 
                 analysisPeriodDays: 30, 
                 dryRun: false
             );
 
-            // ✅ Verificar se foi cancelado
             cancellationToken.ThrowIfCancellationRequested();
 
-            _logger.LogInformation("📊 [STORAGE] Análise concluída - {findings} findings para {subscriptionId}", 
+            _logger.LogInformation("[STORAGE] Analise concluida - {findings} findings para {subscriptionId}", 
                 result.Findings.Count, subscriptionId);
 
             return result;
         }
         catch (OperationCanceledException)
         {
-            _logger.LogWarning("⏰ [STORAGE] Análise cancelada por timeout para {subscriptionId}", subscriptionId);
+            _logger.LogWarning("[STORAGE] Analise cancelada por timeout para {subscriptionId}", subscriptionId);
             throw;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ [STORAGE] Erro na execução da análise para {subscriptionId}", subscriptionId);
+            _logger.LogError(ex, "[STORAGE] Erro na execucao da analise para {subscriptionId}", subscriptionId);
             throw;
         }
     }
 
     /// <summary>
-    /// 💾 Salva resultados da análise de Storage Account
+    /// Salva resultados da analise de Storage Account.
     /// </summary>
     private async Task SaveStorageAnalysisResultsAsync(
         Models.StandardAnalyzerResult analysisResult, 
@@ -183,7 +177,7 @@ public class StorageAnalysisQueueFunction
     {
         try
         {
-            // 📊 Preparar dados para salvar
+            // Prepara payload para persistencia.
             var storageResults = new
             {
                 subscription_id = subscriptionId,
@@ -196,20 +190,19 @@ public class StorageAnalysisQueueFunction
                 findings = analysisResult.Findings
             };
 
-            // 💾 Salvar usando o serviço existente
             await _storageService.SaveAsync(subscriptionId, storageResults, startTime);
             
-            _logger.LogInformation("💾 [STORAGE] Resultados salvos no storage para {subscriptionId}", subscriptionId);
+            _logger.LogInformation("[STORAGE] Resultados salvos no storage para {subscriptionId}", subscriptionId);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ [STORAGE] Erro ao salvar resultados para {subscriptionId}", subscriptionId);
-            // Não re-throw - falha no save não deve falhar a análise inteira
+            _logger.LogError(ex, "[STORAGE] Erro ao salvar resultados para {subscriptionId}", subscriptionId);
+            // Falha ao salvar nao deve falhar toda a analise.
         }
     }
 
     /// <summary>
-    /// 📅 Reagenda mensagem quando der rate limit ou timeout
+    /// Reagenda mensagem em caso de rate limit ou timeout.
     /// Política: retry 0→2min, 1→5min, 2→15min, 3+→30min
     /// Máximo 6 reagendamentos antes de DLQ manual
     /// </summary>
@@ -217,19 +210,17 @@ public class StorageAnalysisQueueFunction
     {
         try
         {
-            // 🔢 Extrair retry count
+            // Extrai contador de tentativa.
             var retryCount = 0;
             if (message.ApplicationProperties.TryGetValue("retryCount", out var v) && v is int i)
                 retryCount = i;
 
-            // 🛑 Limite máximo de retries
             if (retryCount >= 6)
             {
-                _logger.LogError("🛑 [STORAGE QUEUE] Máximo de retries ({retryCount}) atingido - enviando para DLQ manual", retryCount);
+                _logger.LogError("[STORAGE QUEUE] Maximo de retries ({retryCount}) atingido - enviando para DLQ manual", retryCount);
                 return;
             }
 
-            // ⏰ Calcular delay crescente
             var delayMinutes = retryCount switch
             {
                 0 => 2,   // 2 minutos
@@ -241,10 +232,10 @@ public class StorageAnalysisQueueFunction
 
             var scheduledTime = DateTimeOffset.UtcNow.AddMinutes(delayMinutes);
             
-            _logger.LogInformation("📅 [STORAGE QUEUE] Reagendando mensagem para {scheduledTime} (delay: {delay}min, retry: {retry})", 
+            _logger.LogInformation("[STORAGE QUEUE] Reagendando mensagem para {scheduledTime} (delay: {delay}min, retry: {retry})", 
                 scheduledTime, delayMinutes, retryCount + 1);
 
-            // 📤 Reagendar mensagem com propriedades de retry
+            // Reagenda mensagem com metadados de retry.
             var messageBody = JsonSerializer.Serialize(request);
             var properties = new Dictionary<string, object>
             {
@@ -256,16 +247,16 @@ public class StorageAnalysisQueueFunction
             
             await _queueService.ScheduleMessageAsync("storage-analysis", messageBody, scheduledTime, properties);
             
-            _logger.LogInformation("✅ [STORAGE QUEUE] Mensagem reagendada com sucesso - retry {retryCount}/6", retryCount + 1);
+            _logger.LogInformation("[STORAGE QUEUE] Mensagem reagendada com sucesso - retry {retryCount}/6", retryCount + 1);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ [STORAGE QUEUE] Erro ao reagendar mensagem: {error}", ex.Message);
+            _logger.LogError(ex, "[STORAGE QUEUE] Erro ao reagendar mensagem: {error}", ex.Message);
         }
     }
 
     /// <summary>
-    /// 🔍 HELPER: Detecta se um erro HTTP é transitório e deve ser reagendado
+    /// Detecta se erro HTTP e transitorio.
     /// </summary>
     private static bool IsTransientError(HttpRequestException ex)
     {
@@ -283,7 +274,7 @@ public class StorageAnalysisQueueFunction
 }
 
 /// <summary>
-/// 📋 Modelo da mensagem para análise de Storage
+/// Modelo da mensagem para analise de storage.
 /// </summary>
 public class StorageAnalysisRequest
 {

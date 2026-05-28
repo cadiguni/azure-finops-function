@@ -7,7 +7,7 @@ using Personal.FinOpsApi.AzureFunctions.Models;
 namespace Personal.FinOpsApi.AzureFunctions.Services;
 
 /// <summary>
-/// 📊 Serviço para agregar dados FinOps para consumo direto pelo Grafana
+///  Serviço para agregar dados FinOps para consumo direto pelo Grafana
 /// Lê blobs brutos → Agrega → Retorna JSON tabular
 /// </summary>
 public class GrafanaDataService
@@ -24,12 +24,12 @@ public class GrafanaDataService
     }
 
     /// <summary>
-    /// 📈 Agrega economias por tipo de recurso - formato otimizado para Grafana
+    ///  Agrega economias por tipo de recurso - formato otimizado para Grafana
     /// Retorna: [{ "label": "App Service Plan", "totalSavings": 6613, "count": 12 }]
     /// </summary>
     public async Task<List<GrafanaResourceTypeAggregation>> GetSavingsByResourceTypeAsync(string date, string subscriptionFilter = "all")
     {
-        _logger.LogInformation("📊 Agregando economias por tipo de recurso para {date}", date);
+        _logger.LogInformation(" Agregando economias por tipo de recurso para {date}", date);
 
         try
         {
@@ -37,13 +37,13 @@ public class GrafanaDataService
             var analysisDate = DateTime.ParseExact(date, "yyyy-MM-dd", null);
             var allRecommendations = await _storageService.GetDailyAnalysisAsync(analysisDate);
             
-            _logger.LogInformation("📥 Carregadas {count} recommendations", allRecommendations.Count);
+            _logger.LogInformation(" Carregadas {count} recommendations", allRecommendations.Count);
 
             // 2. Filtrar por subscription se especificado
             if (subscriptionFilter != "all" && !string.IsNullOrEmpty(subscriptionFilter))
             {
                 allRecommendations = allRecommendations.Where(f => f.SubscriptionId == subscriptionFilter).ToList();
-                _logger.LogInformation("🔍 Filtrado para subscription {subscription}: {count} recommendations", subscriptionFilter, allRecommendations.Count);
+                _logger.LogInformation(" Filtrado para subscription {subscription}: {count} recommendations", subscriptionFilter, allRecommendations.Count);
             }
 
             // 3. Agrupar por tipo de recurso e agregar
@@ -59,22 +59,22 @@ public class GrafanaDataService
                 .OrderByDescending(a => a.TotalSavings)
                 .ToList();
 
-            _logger.LogInformation("📊 Agregação concluída: {types} tipos de recurso", aggregated.Count);
+            _logger.LogInformation(" Agregação concluída: {types} tipos de recurso", aggregated.Count);
             return aggregated;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Erro ao agregar por tipo de recurso");
+            _logger.LogError(ex, " Erro ao agregar por tipo de recurso");
             return new List<GrafanaResourceTypeAggregation>();
         }
     }
 
     /// <summary>
-    /// 🏢 Agrega economias por subscription - formato otimizado para Grafana
+    ///  Agrega economias por subscription - formato otimizado para Grafana
     /// </summary>
     public async Task<List<GrafanaSubscriptionAggregation>> GetSavingsBySubscriptionAsync(string date)
     {
-        _logger.LogInformation("🏢 Agregando economias por subscription para {date}", date);
+        _logger.LogInformation(" Agregando economias por subscription para {date}", date);
 
         try
         {
@@ -94,23 +94,23 @@ public class GrafanaDataService
                 .OrderByDescending(a => a.TotalSavings)
                 .ToList();
 
-            _logger.LogInformation("🏢 Agregação por subscription concluída: {subs} subscriptions", aggregated.Count);
+            _logger.LogInformation(" Agregação por subscription concluída: {subs} subscriptions", aggregated.Count);
             return aggregated;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Erro ao agregar por subscription");
+            _logger.LogError(ex, " Erro ao agregar por subscription");
             return new List<GrafanaSubscriptionAggregation>();
         }
     }
 
     /// <summary>
-    /// 🎯 Retorna detalhes individuais por recurso - formato Grafana
+    ///  Retorna detalhes individuais por recurso - formato Grafana
     /// Formato: [{ "subscriptionId": "...", "resourceType": "AppServicePlan", "recommendation": "Underutilized", ... }]
     /// </summary>
     public async Task<List<GrafanaResourceDetail>> GetResourceDetailsAsync(string date, string subscriptionFilter = "all", string resourceTypeFilter = "all")
     {
-        _logger.LogInformation("🎯 Obtendo detalhes de recursos para {date}", date);
+        _logger.LogInformation(" Obtendo detalhes de recursos para {date}", date);
 
         try
         {
@@ -143,18 +143,18 @@ public class GrafanaDataService
                 Description = f.Description
             }).ToList();
 
-            _logger.LogInformation("🎯 Detalhes obtidos: {count} recursos", details.Count);
+            _logger.LogInformation(" Detalhes obtidos: {count} recursos", details.Count);
             return details;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Erro ao obter detalhes de recursos");
+            _logger.LogError(ex, " Erro ao obter detalhes de recursos");
             return new List<GrafanaResourceDetail>();
         }
     }
 
     /// <summary>
-    /// 🏷️ Formata labels amigáveis para tipos de recurso
+    ///  Formata labels amigáveis para tipos de recurso
     /// </summary>
     private string FormatResourceTypeLabel(string resourceType)
     {
@@ -170,7 +170,7 @@ public class GrafanaDataService
     }
 
     /// <summary>
-    /// 🏢 Obtém label amigável para subscription (pode ser expandido com mapeamento)
+    ///  Obtém label amigável para subscription (pode ser expandido com mapeamento)
     /// </summary>
     private string GetSubscriptionLabel(string subscriptionId)
     {
@@ -180,21 +180,21 @@ public class GrafanaDataService
     }
 
     /// <summary>
-    /// 🐛 Debug - Lista blobs disponíveis para uma data específica
+    ///  Debug - Lista blobs disponíveis para uma data específica
     /// </summary>
     public async Task<object> DebugBlobsForDateAsync(DateTime date)
     {
-        _logger.LogInformation("🐛 Iniciando debug para data: {date}", date.ToString("yyyy-MM-dd"));
+        _logger.LogInformation(" Iniciando debug para data: {date}", date.ToString("yyyy-MM-dd"));
 
         try
         {
             // 1. Testar prefix building
             var expectedPrefix = $"analyses/year={date:yyyy}/month={date:MM}/day={date:dd}/";
-            _logger.LogInformation("🔍 Prefix esperado: {prefix}", expectedPrefix);
+            _logger.LogInformation(" Prefix esperado: {prefix}", expectedPrefix);
 
             // 2. Listar subscriptions
             var subscriptions = await _storageService.ListSubscriptionsByDateAsync(date);
-            _logger.LogInformation("🏢 Subscriptions encontradas: {count}", subscriptions.Count);
+            _logger.LogInformation(" Subscriptions encontradas: {count}", subscriptions.Count);
 
             // 3. DEBUG DETALHADO - Listar todos os blobs com o prefix
             var allBlobs = new List<string>();
@@ -218,7 +218,7 @@ public class GrafanaDataService
             try 
             {
                 var loadedRecommendations = await _storageService.GetDailyAnalysisAsync(date);
-                _logger.LogInformation("📥 Recommendations carregadas via GetDailyAnalysisAsync: {count}", loadedRecommendations.Count);
+                _logger.LogInformation(" Recommendations carregadas via GetDailyAnalysisAsync: {count}", loadedRecommendations.Count);
                 
                 recommendations = loadedRecommendations.Take(2).Cast<object>().ToList(); // Primeiros 2 para debug
             }
@@ -248,7 +248,7 @@ public class GrafanaDataService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Erro no debug");
+            _logger.LogError(ex, " Erro no debug");
             return new
             {
                 Date = date.ToString("yyyy-MM-dd"),
@@ -259,17 +259,17 @@ public class GrafanaDataService
     }
 
     /// <summary>
-    /// 🐛 Debug específico - Tenta ler um blob específico diretamente
+    ///  Debug específico - Tenta ler um blob específico diretamente
     /// </summary>
     public async Task<object> DebugSpecificBlobAsync(DateTime date, string subscriptionId)
     {
-        _logger.LogInformation("🐛 Testando leitura específica de blob para subscription: {subscription}", subscriptionId);
+        _logger.LogInformation(" Testando leitura específica de blob para subscription: {subscription}", subscriptionId);
 
         try
         {
             // Construir o path exato do blob
             var blobPath = $"analyses/year={date:yyyy}/month={date:MM}/day={date:dd}/{subscriptionId}/recommendations.json";
-            _logger.LogInformation("📂 Path do blob: {path}", blobPath);
+            _logger.LogInformation(" Path do blob: {path}", blobPath);
 
             // Acessar diretamente
             var containerClient = _storageService.GetContainerClient();
@@ -277,7 +277,7 @@ public class GrafanaDataService
 
             // Verificar se existe
             var exists = await blobClient.ExistsAsync();
-            _logger.LogInformation("📁 Blob existe: {exists}", exists.Value);
+            _logger.LogInformation(" Blob existe: {exists}", exists.Value);
 
             if (!exists.Value)
             {
@@ -291,14 +291,14 @@ public class GrafanaDataService
 
             // Ler propriedades
             var properties = await blobClient.GetPropertiesAsync();
-            _logger.LogInformation("📏 Tamanho: {size} bytes", properties.Value.ContentLength);
+            _logger.LogInformation(" Tamanho: {size} bytes", properties.Value.ContentLength);
 
             // Ler conteúdo
             var response = await blobClient.DownloadStreamingAsync();
             using var reader = new StreamReader(response.Value.Content);
             var content = await reader.ReadToEndAsync();
 
-            _logger.LogInformation("📄 Conteúdo length: {length}", content.Length);
+            _logger.LogInformation(" Conteúdo length: {length}", content.Length);
 
             // Tentar deserializar como List<CostRecommendation>
             object listDeserializationResult;
@@ -353,7 +353,7 @@ public class GrafanaDataService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Erro no debug específico");
+            _logger.LogError(ex, " Erro no debug específico");
             return new
             {
                 Error = ex.Message,
@@ -364,7 +364,7 @@ public class GrafanaDataService
 }
 
 /// <summary>
-/// 📊 Modelo de dados agregados por tipo de recurso para Grafana
+///  Modelo de dados agregados por tipo de recurso para Grafana
 /// </summary>
 public class GrafanaResourceTypeAggregation
 {
@@ -375,7 +375,7 @@ public class GrafanaResourceTypeAggregation
 }
 
 /// <summary>
-/// 🏢 Modelo de dados agregados por subscription para Grafana
+///  Modelo de dados agregados por subscription para Grafana
 /// </summary>
 public class GrafanaSubscriptionAggregation
 {
@@ -387,7 +387,7 @@ public class GrafanaSubscriptionAggregation
 }
 
 /// <summary>
-/// 🎯 Modelo de dados detalhados por recurso para Grafana
+///  Modelo de dados detalhados por recurso para Grafana
 /// </summary>
 public class GrafanaResourceDetail
 {

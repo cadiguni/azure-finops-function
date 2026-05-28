@@ -2,12 +2,14 @@ using Azure.Identity;
 using Personal.FinOpsApi.AzureFunctions.Models;
 using Personal.FinOpsApi.AzureFunctions.Services;
 using Microsoft.Extensions.Logging;
+using System.Globalization;
+using System.Net.Http.Headers;
 using System.Text.Json;
 
 namespace Personal.FinOpsApi.AzureFunctions.Analyzers;
 
 /// <summary>
-/// 📦 ANALYZER v3.0 - Storage Account com métricas REAIS
+///  ANALYZER v3.0 - Storage Account com métricas REAIS
 /// Analisa Storage Accounts usando Azure Monitor para métricas reais de uso
 /// </summary>
 public class StorageAccountAnalyzer
@@ -16,35 +18,38 @@ public class StorageAccountAnalyzer
     private readonly DefaultAzureCredential _credential;
     private readonly AzureMetricsService _metricsService;
     private readonly HttpRetryService _httpRetryService;
+    private readonly ResourceCostLookupService _costLookupService;
     private readonly ILogger<StorageAccountAnalyzer> _logger;
 
     public StorageAccountAnalyzer(
         HttpClient httpClient, 
         AzureMetricsService metricsService,
         HttpRetryService httpRetryService,
+        ResourceCostLookupService costLookupService,
         ILogger<StorageAccountAnalyzer> logger)
     {
         _httpClient = httpClient;
         _credential = new DefaultAzureCredential();
         _metricsService = metricsService;
         _httpRetryService = httpRetryService;
+        _costLookupService = costLookupService;
         _logger = logger;
     }
 
     /// <summary>
-    /// 🎯 Analisa Storage Accounts com otimizações profissionais FinOps
-    /// 🚀 V4.1: Filtro grosso + histórico + paralelismo controlado + timeout protection
+    ///  Analisa Storage Accounts com otimizações profissionais FinOps
+    ///  V4.1: Filtro grosso + histórico + paralelismo controlado + timeout protection
     /// </summary>
     public async Task<StandardAnalyzerResult> AnalyzeSubscriptionAsync(string subscriptionId, int analysisPeriodDays = 30, bool dryRun = true)
     {
-        // 🚀 ESTRATÉGIA PROFISSIONAL #3: Verificar histórico antes de rodar análise
+        //  ESTRATÉGIA PROFISSIONAL #3: Verificar histórico antes de rodar análise
         var today = DateTime.Today.ToString("yyyy-MM-dd");
         if (!dryRun)
         {
             var existingAnalysis = await CheckExistingAnalysisAsync(subscriptionId, today);
             if (existingAnalysis)
             {
-                _logger.LogInformation("✅ Storage analysis já executada hoje para subscription {subscriptionId} - pulando", subscriptionId);
+                _logger.LogInformation(" Storage analysis já executada hoje para subscription {subscriptionId} - pulando", subscriptionId);
                 return CreateSkippedResult(subscriptionId, analysisPeriodDays, "already-analyzed-today");
             }
         }
@@ -70,7 +75,7 @@ public class StorageAccountAnalyzer
 
         try
         {
-            _logger.LogInformation("🔍 {analyzer}: Iniciando análise OTIMIZADA para subscription {subscriptionId}", 
+            _logger.LogInformation(" {analyzer}: Iniciando análise OTIMIZADA para subscription {subscriptionId}", 
                 AnalyzerNames.STORAGE_ACCOUNT_ANALYZER, subscriptionId);
 
             // Query KQL para Storage Accounts
@@ -94,30 +99,35 @@ public class StorageAccountAnalyzer
             result.ExecutionMetadata["queryExecutions"] = 1;
             result.ExecutionMetadata["resourcesAnalyzed"] = storageAccounts.Count;
 
-            // 🔍 ESTRATÉGIA PROFISSIONAL #1: Resource Graph como filtro grosso
+            //  ESTRATÉGIA PROFISSIONAL #1: Resource Graph como filtro grosso
             // Primeiro identifica candidatos suspeitos SEM chamar métricas
             var suspiciousCandidates = FilterSuspiciousStorageAccounts(storageAccounts);
             
-            _logger.LogInformation("🎯 Filtro grosso: {total} storages → {suspicious} candidatos suspeitos para análise detalhada", 
+            _logger.LogInformation(" Filtro grosso: {total} storages → {suspicious} candidatos suspeitos para análise detalhada", 
                 storageAccounts.Count, suspiciousCandidates.Count);
 
-            // 📊 Métricas de otimização
+            //  Métricas de otimização
             var optimizationRatio = storageAccounts.Count > 0 ? (1.0 - ((double)suspiciousCandidates.Count / storageAccounts.Count)) * 100 : 0;
-            _logger.LogInformation("🚀 Otimização: {ratio:F1}% menos chamadas Azure Monitor", optimizationRatio);
+            _logger.LogInformation(" Otimização: {ratio:F1}% menos chamadas Azure Monitor", optimizationRatio);
 
             result.ExecutionMetadata["totalStorageAccounts"] = storageAccounts.Count;
             result.ExecutionMetadata["suspiciousCandidates"] = suspiciousCandidates.Count;
             result.ExecutionMetadata["optimizationPercentage"] = optimizationRatio;
             result.ExecutionMetadata["resourcesAnalyzed"] = suspiciousCandidates.Count;
 
-            // 🚨 TIMEOUT PROTECTION: Limite de 6 minutos para análise de Storage Accounts
+            // Baseline de custo real por recurso (Cost Management) com fallback para heurística atual.
+            var costBaselines = await GetStorageCostBaselinesAsync(subscriptionId, analysisPeriodDays);
+            result.ExecutionMetadata["costBaselineResources"] = costBaselines.Count;
+            result.ExecutionMetadata["costBaselineWindowDays"] = analysisPeriodDays;
+
+            //  TIMEOUT PROTECTION: Limite de 6 minutos para análise de Storage Accounts
             using var timeoutCts = new CancellationTokenSource(TimeSpan.FromMinutes(6));
             
-            // 🎯 LIMIT PROTECTION: Máximo 50 storage accounts para evitar timeout
+            //  LIMIT PROTECTION: Máximo 50 storage accounts para evitar timeout
             var limitedCandidates = suspiciousCandidates.Take(50).ToList();
             if (limitedCandidates.Count < suspiciousCandidates.Count)
             {
-                _logger.LogWarning("⚠️ Limitando análise a {limit} de {total} storage accounts para evitar timeout", 
+                _logger.LogWarning(" Limitando análise a {limit} de {total} storage accounts para evitar timeout", 
                     limitedCandidates.Count, suspiciousCandidates.Count);
             }
 
@@ -129,7 +139,7 @@ public class StorageAccountAnalyzer
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "⚠️ Erro ao analisar storage {storage}, continuando...", 
+                    _logger.LogWarning(ex, " Erro ao analisar storage {storage}, continuando...", 
                         storage.TryGetProperty("name", out var name) ? name.GetString() : "unknown");
                     return null;
                 }
@@ -149,21 +159,21 @@ public class StorageAccountAnalyzer
                 result.ExecutionMetadata["timeout_occurred"] = true;
             }
 
-            Console.WriteLine($"🏪 {AnalyzerNames.STORAGE_ACCOUNT_ANALYZER}: {result.Findings.Count} findings gerados com {optimizationRatio:F1}% otimização");
+            Console.WriteLine($" {AnalyzerNames.STORAGE_ACCOUNT_ANALYZER}: {result.Findings.Count} findings gerados com {optimizationRatio:F1}% otimização");
 
             // Validar contrato antes de retornar
             var (isValid, errors) = AnalyzerContractValidator.ValidateResult(result);
             if (!isValid)
             {
-                Console.WriteLine($"❌ CONTRATO INVÁLIDO: {string.Join(", ", errors)}");
+                Console.WriteLine($" CONTRATO INVÁLIDO: {string.Join(", ", errors)}");
                 throw new InvalidOperationException($"Analyzer não segue o contrato padrão: {string.Join(", ", errors)}");
             }
 
-            Console.WriteLine($"✅ CONTRATO VÁLIDO: {result.Findings.Count} findings");
+            Console.WriteLine($" CONTRATO VÁLIDO: {result.Findings.Count} findings");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"❌ Erro no {AnalyzerNames.STORAGE_ACCOUNT_ANALYZER}: {ex.Message}");
+            Console.WriteLine($" Erro no {AnalyzerNames.STORAGE_ACCOUNT_ANALYZER}: {ex.Message}");
             
             // Mesmo com erro, retorna resultado válido
             result.ExecutionMetadata["error"] = ex.Message;
@@ -176,13 +186,13 @@ public class StorageAccountAnalyzer
     {
         try
         {
-            Console.WriteLine("🔐 Storage: Iniciando autenticação Azure...");
+            Console.WriteLine(" Storage: Iniciando autenticação Azure...");
             
             var tokenRequestContext = new Azure.Core.TokenRequestContext(new[] { "https://management.azure.com/.default" });
             var tokenResponse = await _credential.GetTokenAsync(tokenRequestContext);
             
-            Console.WriteLine("✅ Storage: Token obtido com sucesso");
-            Console.WriteLine($"📤 Storage: Executando query KQL: {query}");
+            Console.WriteLine(" Storage: Token obtido com sucesso");
+            Console.WriteLine($" Storage: Executando query KQL: {query}");
 
             var requestBody = new
             {
@@ -196,7 +206,7 @@ public class StorageAccountAnalyzer
             _httpClient.DefaultRequestHeaders.Clear();
             _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {tokenResponse.Token}");
             
-            // �️ RETRY RESILIENTE: Usar HttpRetryService para Resource Graph
+            //  RETRY RESILIENTE: Usar HttpRetryService para Resource Graph
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60)); // Aumentar timeout para incluir retries
             var response = await _httpRetryService.PostWithRetryAsync(
                 _httpClient,
@@ -204,49 +214,51 @@ public class StorageAccountAnalyzer
                 content, 
                 cts.Token);
 
-            // 🚨 Tratamento especial para 429 persistente
+            //  Tratamento especial para 429 persistente
             if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
             {
-                _logger.LogWarning("⚠️ Resource Graph API rate-limited - pulando descoberta Storage Accounts");
+                _logger.LogWarning(" Resource Graph API rate-limited - pulando descoberta Storage Accounts");
                 return new List<JsonElement>(); // Retorna vazio em vez de falhar
             }
 
             if (response.IsSuccessStatusCode)
             {
                 var responseContent = await response.Content.ReadAsStringAsync();
-                Console.WriteLine($"📥 Storage: Resource Graph resposta: {responseContent}");
+                Console.WriteLine($" Storage: Resource Graph resposta: {responseContent}");
                 var result = JsonSerializer.Deserialize<JsonElement>(responseContent);
 
                 if (result.TryGetProperty("data", out var dataElement))
                 {
                     var dataList = dataElement.EnumerateArray().ToList();
-                    Console.WriteLine($"📊 Storage: Encontrados {dataList.Count} recursos na query");
+                    Console.WriteLine($" Storage: Encontrados {dataList.Count} recursos na query");
                     return dataList;
                 }
             }
             else
             {
                 var errorContent = await response.Content.ReadAsStringAsync();
-                Console.WriteLine($"❌ Storage: Erro na query Resource Graph: {response.StatusCode} - {errorContent}");
+                Console.WriteLine($" Storage: Erro na query Resource Graph: {response.StatusCode} - {errorContent}");
             }
         }
         catch (Azure.Identity.AuthenticationFailedException authEx)
         {
-            Console.WriteLine($"❌ Storage: Falha de autenticação Azure: {authEx.Message}");
+            Console.WriteLine($" Storage: Falha de autenticação Azure: {authEx.Message}");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"❌ Storage: Erro ao executar query Resource Graph: {ex.Message}");
+            Console.WriteLine($" Storage: Erro ao executar query Resource Graph: {ex.Message}");
         }
 
         return new List<JsonElement>();
     }
 
     /// <summary>
-    /// 📦 Cria finding baseado em métricas REAIS do Azure Monitor 
-    /// 🎯 V3.0: Análise inteligente usando Transactions, Capacity e Traffic
+    ///  Cria finding baseado em métricas REAIS do Azure Monitor 
+    ///  V3.0: Análise inteligente usando Transactions, Capacity e Traffic
     /// </summary>
-    private async Task<StandardFinding?> CreateStorageFindingWithMetricsAsync(JsonElement storage, int analysisPeriodDays)
+    private async Task<StandardFinding?> CreateStorageFindingWithMetricsAsync(
+        JsonElement storage,
+        int analysisPeriodDays)
     {
         try
         {
@@ -264,13 +276,13 @@ public class StorageAccountAnalyzer
                 return null;
             }
 
-            // 🔍 Buscar métricas REAIS do Azure Monitor
+            //  Buscar métricas REAIS do Azure Monitor
             var metrics = await _metricsService.GetStorageAccountMetricsAsync(resourceId, analysisPeriodDays);
 
-            _logger.LogInformation("📦 Storage {name}: Transactions={transactions}/dia, Capacity={capacity:F1}GB, Traffic={traffic:F1}GB", 
+            _logger.LogInformation(" Storage {name}: Transactions={transactions}/dia, Capacity={capacity:F1}GB, Traffic={traffic:F1}GB", 
                 name, metrics.AvgTransactionsPerDay, metrics.AvgUsedCapacityGB, metrics.TotalIngressGB + metrics.TotalEgressGB);
 
-            // 🧠 Lógica inteligente de detecção de subutilização
+            //  Lógica inteligente de detecção de subutilização
             var isUnderutilized = false;
             var reasonDetails = new List<string>();
 
@@ -293,7 +305,7 @@ public class StorageAccountAnalyzer
                 reasonDetails.Add($"Tráfego baixo: {totalTrafficGB * 1024:F0}MB em {analysisPeriodDays} dias");
             }
 
-            // 🎯 Critérios de subutilização mais rigorosos:
+            //  Critérios de subutilização mais rigorosos:
             // - Transações muito baixas E (capacidade baixa OU tráfego baixo)
             // - Storage com zero atividade em múltiplas métricas
             isUnderutilized = (metrics.AvgTransactionsPerDay < 10 && (metrics.AvgUsedCapacityGB < 0.1 || totalTrafficGB < 0.01)) ||
@@ -301,12 +313,12 @@ public class StorageAccountAnalyzer
 
             if (!isUnderutilized)
             {
-                _logger.LogInformation("✅ Storage {name} tem uso adequado - não será incluído nas recomendações", name);
+                _logger.LogInformation(" Storage {name} tem uso adequado - não será incluído nas recomendações", name);
                 return null; // Storage com uso adequado
             }
 
-            // Estimativa de custo baseada no SKU
-            decimal estimatedMonthlyCost = sku?.ToLower() switch
+            // Estimativa de custo baseada no SKU (fallback)
+            decimal estimatedMonthlyCostBySku = sku?.ToLower() switch
             {
                 var s when s?.Contains("standard_lrs") == true => 15.00m,
                 var s when s?.Contains("standard_grs") == true => 25.00m,
@@ -314,6 +326,13 @@ public class StorageAccountAnalyzer
                 var s when s?.Contains("premium") == true => 120.00m,
                 _ => 18.00m
             };
+
+            // 💰 CUSTO REAL: Buscar do Cost Management primeiro, fallback para tabela por SKU
+            var costData = await _costLookupService.GetResourceCostDataAsync(subscriptionId ?? "", resourceId);
+            var hasRealBaseline = costData.MonthlyCost > 0;
+            var dailyCost = hasRealBaseline ? costData.DailyCost : estimatedMonthlyCostBySku / 30;
+            var estimatedMonthlyCost = hasRealBaseline ? costData.MonthlyCost : estimatedMonthlyCostBySku;
+            var costSource = hasRealBaseline ? "cost-management" : "sku-fallback";
 
             // Economia baseada no nível de subutilização
             var savingsPercentage = metrics.AvgTransactionsPerDay < 1 ? 0.9m : 0.7m; // 90% se quase sem uso, 70% se baixo uso
@@ -328,6 +347,7 @@ public class StorageAccountAnalyzer
                 ResourceGroup = resourceGroup ?? "",
                 SubscriptionId = subscriptionId ?? "",
                 Location = location ?? "",
+                DailyCost = dailyCost,
                 EstimatedMonthlyCost = estimatedMonthlyCost,
                 EstimatedMonthlySavings = monthlySavings,
                 Currency = "BRL",
@@ -336,8 +356,8 @@ public class StorageAccountAnalyzer
                 Confidence = metrics.AvgTransactionsPerDay < 1 ? 0.9 : 0.7, // Alta confiança se quase sem uso
                 Description = $"Storage Account '{name}' ({sku}) subutilizado há {analysisPeriodDays} dias: {string.Join(", ", reasonDetails)}",
                 Recommendation = metrics.AvgTransactionsPerDay < 1 
-                    ? "Storage praticamente sem uso - considere exclusão para economia total."
-                    : "Revisar necessidade ou migrar para tier mais econômico (Cool/Archive).",
+                    ? "Investigar Storage praticamente sem uso. Verificar se há dependências ocultas (backups, logs) antes de qualquer ação."
+                    : "Investigar necessidade e avaliar migração para tier mais econômico (Cool/Archive).",
                 Metadata = new Dictionary<string, object>
                 {
                     { "sku", sku ?? "" },
@@ -349,7 +369,10 @@ public class StorageAccountAnalyzer
                     { "analysisPeriodDays", analysisPeriodDays },
                     { "estimationModel", "azure-monitor-metrics" },
                     { "potentialSavingsPercentage", (double)savingsPercentage },
-                    { "confidence", metrics.AvgTransactionsPerDay < 1 ? "high" : "medium" }
+                    { "confidence", metrics.AvgTransactionsPerDay < 1 ? "high" : "medium" },
+                    { "costSource", costSource },
+                    { "estimatedMonthlyCostSkuFallback", estimatedMonthlyCostBySku },
+                    { "realCostFromApi", costData.MonthlyCost }
                 }
             };
 
@@ -362,19 +385,94 @@ public class StorageAccountAnalyzer
                 }
             }
 
-            _logger.LogInformation("⚠️ Storage {name} marcado como subutilizado: {reasons}", name, string.Join(", ", reasonDetails));
+            _logger.LogInformation(" Storage {name} marcado como subutilizado: {reasons}", name, string.Join(", ", reasonDetails));
             return finding;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Erro ao criar finding para Storage Account");
+            _logger.LogError(ex, " Erro ao criar finding para Storage Account");
             return null;
         }
     }
 
     /// <summary>
-    /// 🎯 FILTRO GROSSO: Identifica candidatos suspeitos SEM chamar Azure Monitor
-    /// 📊 Estratégia Profissional - reduz chamadas de 6000 para ~500
+    /// Obtém custos reais via ResourceCostLookupService (centralizado)
+    /// </summary>
+    private async Task<Dictionary<string, decimal>> GetStorageCostBaselinesAsync(string subscriptionId, int analysisPeriodDays)
+    {
+        try
+        {
+            // Usar o serviço centralizado que faz cache e projeção mensal
+            await _costLookupService.PreloadCostsAsync(subscriptionId);
+            _logger.LogInformation("💰 Cost baseline carregado via ResourceCostLookupService para subscription {SubscriptionId}", subscriptionId);
+            
+            // O lookup será feito por resourceId individual quando necessário
+            // Retornamos dicionário vazio - o lookup será feito no CreateStorageFindingWithMetricsAsync
+            return new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "💰 Falha ao pré-carregar custos. Usando fallback heurístico.");
+            return new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private static int FindColumnIndex(IEnumerable<dynamic> columns, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            var match = columns.FirstOrDefault(c =>
+                string.Equals((string)c.Name, name, StringComparison.OrdinalIgnoreCase));
+            if (match != null)
+            {
+                return (int)match.Index;
+            }
+        }
+
+        return -1;
+    }
+
+    private static string? ReadString(JsonElement row, int index)
+    {
+        if (index < 0 || index >= row.GetArrayLength())
+        {
+            return null;
+        }
+
+        var item = row[index];
+        return item.ValueKind switch
+        {
+            JsonValueKind.String => item.GetString(),
+            JsonValueKind.Number => item.GetRawText(),
+            _ => item.ToString()
+        };
+    }
+
+    private static decimal ReadDecimal(JsonElement row, int index)
+    {
+        if (index < 0 || index >= row.GetArrayLength())
+        {
+            return 0m;
+        }
+
+        var item = row[index];
+        if (item.ValueKind == JsonValueKind.Number && item.TryGetDecimal(out var value))
+        {
+            return value;
+        }
+
+        if (item.ValueKind == JsonValueKind.String &&
+            decimal.TryParse(item.GetString(), NumberStyles.Any, CultureInfo.InvariantCulture, out var parsed))
+        {
+            return parsed;
+        }
+
+        return 0m;
+    }
+
+    /// <summary>
+    ///  FILTRO GROSSO: Identifica candidatos suspeitos SEM chamar Azure Monitor
+    ///  Estratégia Profissional - reduz chamadas de 6000 para ~500
     /// </summary>
     private List<JsonElement> FilterSuspiciousStorageAccounts(List<JsonElement> allStorageAccounts)
     {
@@ -389,13 +487,13 @@ public class StorageAccountAnalyzer
                 var kind = storage.GetProperty("kind").GetString()?.ToLower() ?? "";
                 var accessTier = storage.GetProperty("accessTier").GetString()?.ToLower() ?? "";
 
-                // 🚨 REGRAS DE FILTRO GROSSO (baseado em padrões comuns):
+                //  REGRAS DE FILTRO GROSSO (baseado em padrões comuns):
                 
                 // 1. Storages com nomes que indicam abandono/teste
                 if (name.Contains("test") || name.Contains("temp") || name.Contains("dev") && name.Contains("old") ||
                     name.Contains("backup") || name.Contains("log") && !name.Contains("prod"))
                 {
-                    _logger.LogDebug("🎯 Candidato por nome suspeito: {name}", name);
+                    _logger.LogDebug(" Candidato por nome suspeito: {name}", name);
                     suspiciousCandidates.Add(storage);
                     continue;
                 }
@@ -403,7 +501,7 @@ public class StorageAccountAnalyzer
                 // 2. Standard LRS básicos (normalmente os mais baratos/abandonados)
                 if (sku.Contains("standard_lrs") && kind.Contains("storage"))
                 {
-                    _logger.LogDebug("🎯 Candidato por tipo básico: {name} ({sku})", name, sku);
+                    _logger.LogDebug(" Candidato por tipo básico: {name} ({sku})", name, sku);
                     suspiciousCandidates.Add(storage);
                     continue;
                 }
@@ -411,7 +509,7 @@ public class StorageAccountAnalyzer
                 // 3. Access tier Archive/Cool (pode estar abandonado)
                 if (accessTier.Contains("cool") || accessTier.Contains("archive"))
                 {
-                    _logger.LogDebug("🎯 Candidato por tier frio: {name} ({accessTier})", name, accessTier);
+                    _logger.LogDebug(" Candidato por tier frio: {name} ({accessTier})", name, accessTier);
                     suspiciousCandidates.Add(storage);
                     continue;
                 }
@@ -422,18 +520,18 @@ public class StorageAccountAnalyzer
                     var rg = rgProperty.GetString()?.ToLower() ?? "";
                     if (rg.Contains("dev") || rg.Contains("test") || rg.Contains("temp"))
                     {
-                        _logger.LogDebug("🎯 Candidato por RG de desenvolvimento: {name} (RG: {rg})", name, rg);
+                        _logger.LogDebug(" Candidato por RG de desenvolvimento: {name} (RG: {rg})", name, rg);
                         suspiciousCandidates.Add(storage);
                         continue;
                     }
                 }
 
-                // ✅ Storage parece em uso ativo - pula análise detalhada
-                _logger.LogDebug("✅ Storage {name} parece ativo - pulando análise de métricas", name);
+                //  Storage parece em uso ativo - pula análise detalhada
+                _logger.LogDebug(" Storage {name} parece ativo - pulando análise de métricas", name);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "⚠️ Erro ao filtrar storage - incluindo na análise completa");
+                _logger.LogWarning(ex, " Erro ao filtrar storage - incluindo na análise completa");
                 suspiciousCandidates.Add(storage); // Em caso de dúvida, analisa
             }
         }
@@ -442,7 +540,7 @@ public class StorageAccountAnalyzer
     }
 
     /// <summary>
-    /// 🗓️ Verifica se já existe análise para hoje (evita reprocessamento)
+    ///  Verifica se já existe análise para hoje (evita reprocessamento)
     /// </summary>
     private async Task<bool> CheckExistingAnalysisAsync(string subscriptionId, string date)
     {
@@ -452,20 +550,20 @@ public class StorageAccountAnalyzer
             // Path seria algo como: analyses/{date}/{subscriptionId}/storage-analysis.json
             await Task.Delay(10); // Simula consulta rápida ao blob
             
-            _logger.LogDebug("🗓️ Verificando histórico para {subscriptionId} em {date}", subscriptionId, date);
+            _logger.LogDebug(" Verificando histórico para {subscriptionId} em {date}", subscriptionId, date);
             
             // Por enquanto, sempre false (pode implementar verificação real depois)
             return false;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "⚠️ Erro ao verificar histórico - prosseguindo com análise");
+            _logger.LogWarning(ex, " Erro ao verificar histórico - prosseguindo com análise");
             return false; // Em caso de erro, roda a análise
         }
     }
 
     /// <summary>
-    /// 📊 Cria resultado vazio para análises puladas
+    ///  Cria resultado vazio para análises puladas
     /// </summary>
     private StandardAnalyzerResult CreateSkippedResult(string subscriptionId, int analysisPeriodDays, string reason)
     {

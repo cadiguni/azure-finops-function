@@ -54,15 +54,25 @@ public class CostRecommendation
     public string SubscriptionId { get; set; } = string.Empty;
     
     /// <summary>
+    /// Management Group ID
+    /// </summary>
+    public string? ManagementGroupId { get; set; }
+    
+    /// <summary>
     /// Localização do recurso
     /// </summary>
     public string Location { get; set; } = string.Empty;
     
     /// <summary>
-    /// Custo mensal estimado (USD)
+    /// Custo mensal estimado (projeção baseada na média diária × 30)
     /// </summary>
     public decimal EstimatedMonthlyCost { get; set; }
-    
+
+    /// <summary>
+    /// Custo diário médio real (baseado no período de análise)
+    /// </summary>
+    public decimal DailyCost { get; set; }
+
     /// <summary>
     /// Economia estimada por mês (USD)
     /// </summary>

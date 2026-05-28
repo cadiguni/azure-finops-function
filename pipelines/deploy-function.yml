@@ -3,7 +3,7 @@ trigger: none
 variables:
   - template: config.yml
   - group: Terraform
-  - group: FinOps-func-Personal
+  - group: FinOps-func-Portfolio
   - name: tfvars
     value: '-var "aplicacao=$(NomeAplicacao)" -var "setor=$(Setor)"'
   - name: workingDirectory
@@ -17,7 +17,7 @@ resources:
       source: FinOps-Platform\FinOps-Back-build-function 
       trigger: true
 
-pool: azp-personal-full-01
+pool: self-hosted-agent-pool
 
 stages:
 - stage: "Deploy_function"

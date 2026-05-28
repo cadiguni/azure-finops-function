@@ -1,0 +1,105 @@
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - frontend/**
+
+variables:
+  - template: config.yml
+  - group: FinOps-func-Portfolio
+  - name: StorageAccountName
+    value: '$(NomeAplicacao)$(Setor)webstg'
+  - name: ApiBaseUrl
+    value: 'https://$(NomeAplicacao)-$(Setor)-func.azurewebsites.net'
+
+pool: self-hosted-agent-pool
+
+stages:
+  - stage: Build_Frontend
+    displayName: 'Build Frontend'
+    jobs:
+      - job: Build
+        displayName: 'Build React App'
+        steps:
+          - task: UseNode@1
+            displayName: 'Usar Node.js 22.x'
+            inputs:
+              version: '22.x'
+
+          - script: |
+              cd frontend/finops-portal
+              npm ci
+            displayName: 'Instalar dependências'
+
+          - script: |
+              cd frontend/finops-portal
+              echo "VITE_API_BASE_URL=$(ApiBaseUrl)" > .env.production
+              echo "VITE_ENTRA_CLIENT_ID=$(VITE_ENTRA_CLIENT_ID)" >> .env.production
+              echo "VITE_ENTRA_TENANT_ID=$(VITE_ENTRA_TENANT_ID)" >> .env.production
+              echo "VITE_ENTRA_REDIRECT_URI=$(VITE_ENTRA_REDIRECT_URI)" >> .env.production
+              npm run build
+            displayName: 'Build do frontend'
+
+          - publish: frontend/finops-portal/dist
+            artifact: 'FinOpsFrontend'
+            condition: succeeded()
+
+  - stage: Deploy_Frontend
+    displayName: 'Deploy Frontend'
+    dependsOn: Build_Frontend
+    jobs:
+      - job: Deploy
+        displayName: 'Deploy to Storage Static Website'
+        steps:
+          - download: current
+            artifact: 'FinOpsFrontend'
+
+          - task: AzureCLI@2
+            displayName: 'Upload para $web'
+            inputs:
+              azureSubscription: '$(ServiceConnection)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+                # Obter chave do storage account
+                ACCOUNT_KEY=$(az storage account keys list \
+                  --account-name $(StorageAccountName) \
+                  --query '[0].value' -o tsv)
+
+                # Upload sem limpeza previa para evitar que index.html em cache
+                # referencie assets hashados que ja foram removidos do storage.
+                az storage blob upload-batch \
+                  --account-name $(StorageAccountName) \
+                  --source $(Pipeline.Workspace)/FinOpsFrontend \
+                  --destination '$web' \
+                  --account-key "$ACCOUNT_KEY" \
+                  --content-cache-control "no-cache, no-store, must-revalidate" \
+                  --overwrite
+
+                echo "✅ Frontend deployed to $(StorageAccountName)"
+
+          - task: AzureCLI@2
+            displayName: 'Invalida Cache do AFD Standard'
+            inputs:
+              azureSubscription: '$(ServiceConnectionFrontDoor)'
+              scriptType: 'bash'
+              scriptLocation: 'inlineScript'
+              inlineScript: |
+               # Executa purge AFD Standard
+                echo "🧹 Executando purge AFD Standard..."
+                echo "Command: az afd endpoint purge --resource-group 'frontdoor-dev-rg' --profile-name 'frontdoor2-dev-afd' --endpoint-name 'finopsplatform-dev-fde' --domains 'finops.personal.com.br' --content-paths '/*' --no-wait"
+        
+                az afd endpoint purge \
+                  --resource-group "frontdoor-dev-rg" \
+                  --profile-name "frontdoor2-dev-afd" \
+                  --endpoint-name "finopsplatform-dev-fde" \
+                  --domains "finops.personal.com.br" \
+                  --content-paths '/*' \
+                  --no-wait
+        
+                echo ""
+                echo "✅ Purge AFD Standard executado com sucesso!"
+                echo "📄 Invalidação: todos os arquivos (/*)"
+                echo "⏰ Propagação: até 10-20 minutos para efeito global"

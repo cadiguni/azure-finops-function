@@ -11,13 +11,19 @@ public class UnattachedDiskAnalyzer
     private readonly HttpClient _httpClient;
     private readonly DefaultAzureCredential _credential;
     private readonly HttpRetryService _httpRetryService;
+    private readonly ResourceCostLookupService _costLookupService;
     private readonly ILogger<UnattachedDiskAnalyzer> _logger;
 
-    public UnattachedDiskAnalyzer(HttpClient httpClient, HttpRetryService httpRetryService, ILogger<UnattachedDiskAnalyzer> logger)
+    public UnattachedDiskAnalyzer(
+        HttpClient httpClient, 
+        HttpRetryService httpRetryService, 
+        ResourceCostLookupService costLookupService,
+        ILogger<UnattachedDiskAnalyzer> logger)
     {
         _httpClient = httpClient;
         _credential = new DefaultAzureCredential();
         _httpRetryService = httpRetryService;
+        _costLookupService = costLookupService;
         _logger = logger;
     }
 
@@ -30,8 +36,11 @@ public class UnattachedDiskAnalyzer
 
         try
         {
-            _logger.LogInformation("💽 Token obtido com sucesso");
-            _logger.LogInformation("📊 Executando query KQL:");
+            _logger.LogInformation(" Token obtido com sucesso");
+            _logger.LogInformation(" Executando query KQL:");
+
+            // Pre-carregar custos do Cost Management para esta subscription
+            await _costLookupService.PreloadCostsAsync(subscriptionId);
 
             // Query KQL otimizada para buscar discos não anexados
             var kqlQuery = $@"
@@ -74,7 +83,7 @@ public class UnattachedDiskAnalyzer
 
             if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
             {
-                _logger.LogWarning("⚠️ Resource Graph API rate-limited - pulando análise de discos");
+                _logger.LogWarning(" Resource Graph API rate-limited - pulando análise de discos");
                 return new StandardAnalyzerResult();
             }
 
@@ -82,7 +91,7 @@ public class UnattachedDiskAnalyzer
             var jsonResponse = await response.Content.ReadAsStringAsync();
             var doc = JsonDocument.Parse(jsonResponse);
 
-            _logger.LogInformation("💽 Resource Graph resposta: {response}", jsonResponse);
+            _logger.LogInformation(" Resource Graph resposta: {response}", jsonResponse);
 
             var data = doc.RootElement.GetProperty("data").EnumerateArray();
             var count = 0;
@@ -97,7 +106,12 @@ public class UnattachedDiskAnalyzer
                 var sku = disk.GetProperty("sku").GetString() ?? "Standard_LRS";
                 var diskSizeGb = disk.GetProperty("diskSizeGb").GetInt32();
 
-                var estimatedMonthlyCost = EstimateDiskMonthlyCost(sku, diskSizeGb);
+                // 💰 CUSTO REAL: Buscar do Cost Management primeiro, fallback para tabela
+                var costData = await _costLookupService.GetResourceCostDataAsync(subscriptionId, resourceId);
+                var dailyCost = costData.DailyCost > 0 ? costData.DailyCost : EstimateDiskMonthlyCostFallback(sku, diskSizeGb) / 30;
+                var estimatedMonthlyCost = costData.MonthlyCost > 0 ? costData.MonthlyCost : EstimateDiskMonthlyCostFallback(sku, diskSizeGb);
+                var costSource = costData.MonthlyCost > 0 ? "cost-management" : "sku-fallback";
+                
                 var monthlySavings = estimatedMonthlyCost * 0.98m; // 98% economia ao remover
 
                 var finding = new StandardFinding
@@ -106,9 +120,10 @@ public class UnattachedDiskAnalyzer
                     ResourceId = resourceId,
                     ResourceName = name,
                     ResourceType = "Microsoft.Compute/disks",
-                    ResourceGroup = resourceGroup,     // ✅ CORRIGIDO: Campo obrigatório
-                    Location = location,               // ✅ CORRIGIDO: Campo obrigatório
+                    ResourceGroup = resourceGroup,     //  CORRIGIDO: Campo obrigatório
+                    Location = location,               //  CORRIGIDO: Campo obrigatório
                     SubscriptionId = subscriptionId,
+                    DailyCost = dailyCost,
                     EstimatedMonthlyCost = estimatedMonthlyCost,
                     EstimatedMonthlySavings = monthlySavings,
                     Currency = "BRL",
@@ -116,24 +131,26 @@ public class UnattachedDiskAnalyzer
                               estimatedMonthlyCost > 60 ? FindingPriorities.MEDIUM : FindingPriorities.LOW,
                     Confidence = 0.95,
                     Description = $"Disco '{name}' ({sku}, {diskSizeGb}GB) não está anexado há mais de {analysisPeriodDays} dias",
-                    Recommendation = "Considere remover este disco se não for necessário. Faça backup dos dados importantes antes da remoção.",
-                    Tags = ExtractTags(disk),          // ✅ CORRIGIDO: Campo no lugar certo
+                    Recommendation = "Investigar se este disco ainda é necessário. Verificar se foi desassociado intencionalmente ou se pode ser removido após backup dos dados.",
+                    Tags = ExtractTags(disk),          //  CORRIGIDO: Campo no lugar certo
                     Metadata = new Dictionary<string, object>
                     {
                         { "sku", sku },
                         { "diskSizeGb", diskSizeGb },
-                        { "unattachedDays", analysisPeriodDays }
+                        { "unattachedDays", analysisPeriodDays },
+                        { "costSource", costSource },
+                        { "realCostFromApi", costData.MonthlyCost }
                     }
                 };
 
                 findings.Add(finding);
             }
 
-            _logger.LogInformation("💽 Encontrados {count} recursos na query", count);
+            _logger.LogInformation(" Encontrados {count} recursos na query", count);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Erro durante análise de discos");
+            _logger.LogError(ex, " Erro durante análise de discos");
         }
 
         var result = new StandardAnalyzerResult
@@ -156,15 +173,15 @@ public class UnattachedDiskAnalyzer
         var (isValid, errors) = AnalyzerContractValidator.ValidateResult(result);
         if (!isValid)
         {
-            _logger.LogWarning("⚠️ Validação falhou: {errors}", string.Join(", ", errors));
+            _logger.LogWarning(" Validação falhou: {errors}", string.Join(", ", errors));
         }
         
         return result;
     }
 
-    private decimal EstimateDiskMonthlyCost(string sku, int sizeGb)
+    private decimal EstimateDiskMonthlyCostFallback(string sku, int sizeGb)
     {
-        // Preços aproximados por GB/mês em BRL
+        // Preços aproximados por GB/mês em BRL - FALLBACK quando Cost Management não retorna dados
         return sku.ToLower() switch
         {
             "standard_lrs" => sizeGb * 0.15m,

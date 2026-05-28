@@ -29,12 +29,12 @@ public class CostAnalysisRequest
     /// <summary>
     /// Se true, não executa ações, apenas simula
     /// </summary>
-    public bool DryRun { get; set; } = true; // � Default seguro: sempre dry-run se não especificado
+    public bool DryRun { get; set; } = true; //  Default seguro: sempre dry-run se não especificado
     
     /// <summary>
     /// Configuração do que incluir na análise
     /// </summary>
-    public AnalysisIncludeOptions AnalysisOptions { get; set; } = new(); // 🔥 NUNCA null!
+    public AnalysisIncludeOptions AnalysisOptions { get; set; } = new(); //  NUNCA null!
 }
 
 public class AnalysisIncludeOptions

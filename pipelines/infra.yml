@@ -1,0 +1,41 @@
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - pipelines/terraform-function/**
+
+resources:
+  repositories:
+    - repository: DEVOPS
+      type: git
+      name: NAP/_git/DevOps
+      ref: 'refs/tags/v4.3.2'
+
+parameters:
+  - name: skipValidateDestroy
+    displayName: '🛡️ Permitir Destruição (⚠️ false=seguro, true=permite destroy automático)'
+    type: boolean
+    default: false
+
+variables:
+  - template: config.yml
+  - group: FinOps-func-Portfolio
+  - group: Terraform
+
+pool: self-hosted-agent-pool
+
+stages:
+  - template: ./templates/terraform/terraform-stage.yml@DEVOPS
+    parameters:
+      Ambiente: '${{ variables.Ambiente }}'
+      NomeAplicacao: '$(NomeAplicacao)'
+      ServiceConnection: '$(ServiceConnection)'
+      TerraformAccessKey: '$(TerraformAccessKey)'
+      workingDirectoryTF: '$(System.DefaultWorkingDirectory)/pipelines/terraform-function'
+      tfVars: '-var "aplicacao=$(NomeAplicacao)" -var "setor=$(Setor)"'
+      backendConfigKeyTF: 'finops/$(NomeAplicacao).tfstate'
+      tfVersionTF: '1.9.3'
+      SetorContainerBackendTerraform: 'nap'
+      skipValidateDestroy: '${{ parameters.skipValidateDestroy }}'

@@ -20,7 +20,7 @@ public class UnusedPublicIpAnalyzer
 
     public async Task<StandardAnalyzerResult> AnalyzeAsync(string subscriptionId, int analysisPeriodDays = 7, bool dryRun = true)
     {
-        _logger.LogInformation("🔍 Iniciando análise de Public IPs ociosos para subscription {sub}", subscriptionId);
+        _logger.LogInformation(" Iniciando análise de Public IPs ociosos para subscription {sub}", subscriptionId);
         
         var findings = new List<StandardFinding>();
 
@@ -39,7 +39,7 @@ public class UnusedPublicIpAnalyzer
             var url =
                 $"https://management.azure.com/subscriptions/{subscriptionId}/providers/Microsoft.Network/publicIPAddresses?api-version=2023-05-01";
 
-            _logger.LogInformation("🌐 Consultando API Azure Resource Manager: {url}", url);
+            _logger.LogInformation(" Consultando API Azure Resource Manager: {url}", url);
 
             var response = await _httpClient.GetAsync(url);
             response.EnsureSuccessStatusCode();
@@ -48,21 +48,21 @@ public class UnusedPublicIpAnalyzer
             using var doc = JsonDocument.Parse(json);
 
             var totalPublicIps = doc.RootElement.GetProperty("value").GetArrayLength();
-            _logger.LogInformation("📊 Encontrados {total} Public IPs na subscription", totalPublicIps);
+            _logger.LogInformation(" Encontrados {total} Public IPs na subscription", totalPublicIps);
 
             foreach (var ip in doc.RootElement.GetProperty("value").EnumerateArray())
             {
                 var properties = ip.GetProperty("properties");
                 var ipName = ip.GetProperty("name").GetString() ?? "unknown";
 
-                // 🔑 REGRA DE OCIOSIDADE: Public IP sem ipConfiguration
+                //  REGRA DE OCIOSIDADE: Public IP sem ipConfiguration
                 if (!properties.TryGetProperty("ipConfiguration", out var ipConfig) || ipConfig.ValueKind == JsonValueKind.Null)
                 {
                     var resourceId = ip.GetProperty("id").GetString() ?? "";
                     var resourceGroup = ExtractResourceGroup(resourceId);
                     var location = ip.TryGetProperty("location", out var loc) ? loc.GetString() ?? "unknown" : "unknown";
                     
-                    // 💰 Custo baseado no SKU
+                    //  Custo baseado no SKU
                     var sku = properties.TryGetProperty("publicIPAllocationMethod", out var allocationMethod) 
                         ? allocationMethod.GetString() 
                         : "Static";
@@ -76,8 +76,8 @@ public class UnusedPublicIpAnalyzer
                         ResourceId = resourceId,
                         ResourceName = ipName,
                         ResourceType = "Microsoft.Network/publicIPAddresses",
-                        ResourceGroup = resourceGroup,     // ✅ CORRIGIDO: Campo obrigatório
-                        Location = location,               // ✅ CORRIGIDO: Campo obrigatório
+                        ResourceGroup = resourceGroup,     //  CORRIGIDO: Campo obrigatório
+                        Location = location,               //  CORRIGIDO: Campo obrigatório
                         SubscriptionId = subscriptionId,
                         EstimatedMonthlyCost = monthlyCost,
                         EstimatedMonthlySavings = monthlySavings,
@@ -85,8 +85,8 @@ public class UnusedPublicIpAnalyzer
                         Priority = FindingPriorities.HIGH,
                         Confidence = 0.95,
                         Description = $"Public IP '{ipName}' não está associado a nenhum recurso há mais de {analysisPeriodDays} dias",
-                        Recommendation = "Considere remover este Public IP se não for necessário. Verifique se não há dependências antes da remoção.",
-                        Tags = ExtractTags(ip),            // ✅ CORRIGIDO: Campo no lugar certo
+                        Recommendation = "Investigar se este IP público ainda é necessário. Verificar se há dependências externas (DNS, firewalls, integrações) antes de qualquer ação.",
+                        Tags = ExtractTags(ip),            //  CORRIGIDO: Campo no lugar certo
                         Metadata = new Dictionary<string, object>
                         {
                             { "sku", sku ?? "Static" },
@@ -95,15 +95,15 @@ public class UnusedPublicIpAnalyzer
                     };
                     
                     findings.Add(finding);
-                    _logger.LogInformation("💡 Public IP ocioso detectado: {name} (R$ {cost}/mês)", ipName, monthlyCost);
+                    _logger.LogInformation(" Public IP ocioso detectado: {name} (R$ {cost}/mês)", ipName, monthlyCost);
                 }
             }
 
-            _logger.LogInformation("✅ Análise concluída: {count} Public IPs ociosos encontrados", findings.Count);
+            _logger.LogInformation(" Análise concluída: {count} Public IPs ociosos encontrados", findings.Count);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Erro ao analisar Public IPs");
+            _logger.LogError(ex, " Erro ao analisar Public IPs");
         }
 
         var result = new StandardAnalyzerResult
@@ -126,7 +126,7 @@ public class UnusedPublicIpAnalyzer
         var (isValid, errors) = AnalyzerContractValidator.ValidateResult(result);
         if (!isValid)
         {
-            _logger.LogWarning("⚠️ Validação falhou: {errors}", string.Join(", ", errors));
+            _logger.LogWarning(" Validação falhou: {errors}", string.Join(", ", errors));
         }
         
         return result;

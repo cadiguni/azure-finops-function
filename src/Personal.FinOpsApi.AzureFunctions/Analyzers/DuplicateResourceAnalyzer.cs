@@ -19,19 +19,19 @@ namespace Personal.FinOpsApi.AzureFunctions.Analyzers
         }
 
         /// <summary>
-        /// 🔍 ANÁLISE DE DUPLICATAS: Detecta recursos com nomes idênticos DENTRO DA MESMA SUBSCRIPTION
+        ///  ANÁLISE DE DUPLICATAS: Detecta recursos com nomes idênticos DENTRO DA MESMA SUBSCRIPTION
         /// 
-        /// ⚠️ IMPORTANTE: Recursos com mesmo nome em subscriptions DIFERENTES são considerados VÁLIDOS
-        /// 🎯 ESCOPO: Apenas intra-subscription (recursos duplicados na mesma subscription)
+        ///  IMPORTANTE: Recursos com mesmo nome em subscriptions DIFERENTES são considerados VÁLIDOS
+        ///  ESCOPO: Apenas intra-subscription (recursos duplicados na mesma subscription)
         /// 
         /// Exemplos:
-        /// ✅ VÁLIDO: vm-web01 em Sub-A e vm-web01 em Sub-B (subscriptions diferentes)
-        /// ❌ DUPLICATA: vm-web01 e vm-web01 na mesma Sub-A (mesma subscription)
+        ///  VÁLIDO: vm-web01 em Sub-A e vm-web01 em Sub-B (subscriptions diferentes)
+        ///  DUPLICATA: vm-web01 e vm-web01 na mesma Sub-A (mesma subscription)
         /// </summary>
         public async Task<List<DuplicateResourceGroup>> AnalyzeDuplicatesAcrossSubscriptionsAsync(
             List<string> subscriptionIds)
         {
-            _logger.LogInformation("🔍 Iniciando análise de recursos duplicados em {Count} assinaturas", 
+            _logger.LogInformation(" Iniciando análise de recursos duplicados em {Count} assinaturas", 
                 subscriptionIds.Count);
 
             var allResources = new List<ResourceInfo>();
@@ -47,25 +47,25 @@ namespace Personal.FinOpsApi.AzureFunctions.Analyzers
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "❌ Erro ao coletar recursos da assinatura {SubscriptionId}", subscriptionId);
+                    _logger.LogError(ex, " Erro ao coletar recursos da assinatura {SubscriptionId}", subscriptionId);
                 }
             }
 
-            // 🎯 CORREÇÃO: Agrupar APENAS dentro da mesma subscription (recursos com mesmo nome em subscriptions diferentes SÃO VÁLIDOS)
+            //  CORREÇÃO: Agrupar APENAS dentro da mesma subscription (recursos com mesmo nome em subscriptions diferentes SÃO VÁLIDOS)
             var resourceGroups = allResources
-                .GroupBy(r => new { r.Name, r.Type, r.SubscriptionId }) // ✅ INCLUIR SubscriptionId no agrupamento
+                .GroupBy(r => new { r.Name, r.Type, r.SubscriptionId }) //  INCLUIR SubscriptionId no agrupamento
                 .Where(g => g.Count() > 1) // Apenas grupos com 2+ recursos NA MESMA subscription
                 .ToList();
 
-            _logger.LogInformation("🔍 Agrupamento por Nome+Tipo+Subscription: {GroupCount} grupos encontrados", resourceGroups.Count);
+            _logger.LogInformation(" Agrupamento por Nome+Tipo+Subscription: {GroupCount} grupos encontrados", resourceGroups.Count);
 
             foreach (var group in resourceGroups)
             {
-                // 🔍 VALIDAÇÃO: Confirmar que todos os recursos estão na mesma subscription
+                //  VALIDAÇÃO: Confirmar que todos os recursos estão na mesma subscription
                 var subscriptions = group.Select(r => r.SubscriptionId).Distinct().ToList();
                 if (subscriptions.Count > 1)
                 {
-                    _logger.LogWarning("⚠️ INCONSISTÊNCIA: Grupo {Name}:{Type} span múltiplas subscriptions: {Subs}", 
+                    _logger.LogWarning(" INCONSISTÊNCIA: Grupo {Name}:{Type} span múltiplas subscriptions: {Subs}", 
                         group.Key.Name, group.Key.Type, string.Join(", ", subscriptions));
                     continue; // Pular este grupo inconsistente
                 }
@@ -82,11 +82,11 @@ namespace Personal.FinOpsApi.AzureFunctions.Analyzers
 
                 duplicateGroups.Add(duplicateGroup);
                 
-                _logger.LogInformation("📦 Duplicatas encontradas: {Name} ({Type}) - {Count} recursos na subscription {Sub}", 
+                _logger.LogInformation(" Duplicatas encontradas: {Name} ({Type}) - {Count} recursos na subscription {Sub}", 
                     group.Key.Name, group.Key.Type, group.Count(), subscriptions[0]);
             }
 
-            _logger.LogInformation("✅ Encontrados {Count} grupos de recursos duplicados", duplicateGroups.Count);
+            _logger.LogInformation(" Encontrados {Count} grupos de recursos duplicados", duplicateGroups.Count);
             
             return duplicateGroups.OrderByDescending(g => g.PotentialSavings).ToList();
         }
@@ -120,10 +120,10 @@ namespace Personal.FinOpsApi.AzureFunctions.Analyzers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "❌ Erro ao acessar assinatura {SubscriptionId}", subscriptionId);
+                _logger.LogError(ex, " Erro ao acessar assinatura {SubscriptionId}", subscriptionId);
             }
 
-            _logger.LogInformation("📊 Coletados {Count} recursos da assinatura {SubscriptionId}", 
+            _logger.LogInformation(" Coletados {Count} recursos da assinatura {SubscriptionId}", 
                 resources.Count, subscriptionId);
             
             return resources;

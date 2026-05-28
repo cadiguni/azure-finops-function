@@ -38,11 +38,11 @@ public class FinOpsResultAggregator
             _containerClient = new BlobContainerClient(connectionString, containerName);
             
             // NÃO criar container automaticamente aqui - só quando salvar
-            _logger.LogInformation("📦 FinOps Result Aggregator inicializado - Container: {container}", containerName);
+            _logger.LogInformation(" FinOps Result Aggregator inicializado - Container: {container}", containerName);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "⚠️ Storage não disponível, funcionando em modo somente-log");
+            _logger.LogWarning(ex, " Storage não disponível, funcionando em modo somente-log");
             _containerClient = null!; // Indica que storage não está disponível
         }
     }
@@ -54,9 +54,9 @@ public class FinOpsResultAggregator
     {
         try
         {
-            _logger.LogInformation("💾 Processando resultado FinOps: {analysisId}", result.AnalysisId);
+            _logger.LogInformation(" Processando resultado FinOps: {analysisId}", result.AnalysisId);
 
-            // 🎯 Nova estrutura: analyses/year=YYYY/month=MM/day=DD/XXX/raw-analysis.json
+            //  Nova estrutura: analyses/year=YYYY/month=MM/day=DD/XXX/raw-analysis.json
             var blobName = BlobPathBuilder.BuildAnalysisPath(
                 result.ExecutedAt,
                 result.SubscriptionId,
@@ -65,7 +65,7 @@ public class FinOpsResultAggregator
             // Se storage não disponível, só loga o que salvaria
             if (_containerClient == null)
             {
-                _logger.LogWarning("⚠️ Storage indisponível - SALVARIA: {blobName} ({recs} recomendações, R$ {savings}/mês)", 
+                _logger.LogWarning(" Storage indisponível - SALVARIA: {blobName} ({recs} recomendações, R$ {savings}/mês)", 
                     blobName, result.Recommendations.Count, result.Summary.TotalEstimatedMonthlySavings);
                 return;
             }
@@ -83,12 +83,12 @@ public class FinOpsResultAggregator
             
             await blobClient.UploadAsync(stream, overwrite: true);
 
-            _logger.LogInformation("✅ Resultado salvo: {blobName} ({size} bytes)", 
+            _logger.LogInformation(" Resultado salvo: {blobName} ({size} bytes)", 
                 blobName, jsonBytes.Length);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Erro ao salvar resultado FinOps - continuando sem storage");
+            _logger.LogError(ex, " Erro ao salvar resultado FinOps - continuando sem storage");
         }
     }
 
@@ -141,7 +141,7 @@ public class FinOpsResultAggregator
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "⚠️ Erro ao listar análises recentes");
+            _logger.LogWarning(ex, " Erro ao listar análises recentes");
             return new List<string>();
         }
     }

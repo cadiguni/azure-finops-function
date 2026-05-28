@@ -122,10 +122,16 @@ public class StandardFinding
     public decimal EstimatedMonthlySavings { get; set; }
 
     /// <summary>
-    /// Custo atual estimado mensal
+    /// Custo atual estimado mensal (projeção baseada na média diária × 30)
     /// </summary>
     [JsonPropertyName("estimatedMonthlyCost")]
     public decimal EstimatedMonthlyCost { get; set; }
+
+    /// <summary>
+    /// Custo diário médio real (baseado no período de análise)
+    /// </summary>
+    [JsonPropertyName("dailyCost")]
+    public decimal DailyCost { get; set; }
 
     /// <summary>
     /// Moeda (BRL, USD, EUR)
@@ -180,6 +186,14 @@ public static class FindingTypes
     public const string UNUSED_PUBLIC_IP = "UnusedPublicIP";
     public const string IDLE_VM = "IdleVirtualMachine";
     public const string UNDERUTILIZED_APP_SERVICE = "UnderUtilizedAppService";
+    public const string UNDERUTILIZED_FUNCTION_APP = "UnderUtilizedFunctionApp";
+    
+    // Log Analytics Finding Types
+    public const string LOG_ANALYTICS_RETENTION = "LogAnalyticsRetention";
+    public const string LOG_ANALYTICS_HIGH_RETENTION = "LogAnalyticsHighRetention";
+    public const string LOG_ANALYTICS_TABLE_RETENTION = "LogAnalyticsTableRetention";
+    public const string LOG_ANALYTICS_LOW_INGESTION = "LogAnalyticsLowIngestion";
+    public const string LOG_ANALYTICS_HIGH_INGESTION = "LogAnalyticsHighIngestion";
 }
 
 public static class FindingPriorities
@@ -196,4 +210,6 @@ public static class AnalyzerNames
     public const string UNUSED_PUBLIC_IP_ANALYZER = "UnusedPublicIpAnalyzer";
     public const string IDLE_VM_ANALYZER = "IdleVmAnalyzer";
     public const string APP_SERVICE_ANALYZER = "AppServiceAnalyzer";
+    public const string FUNCTION_APP_ANALYZER = "FunctionAppAnalyzer";
+    public const string LOG_ANALYTICS_ANALYZER = "LogAnalyticsAnalyzer";
 }

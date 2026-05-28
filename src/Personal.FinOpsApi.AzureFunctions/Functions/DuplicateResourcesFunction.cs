@@ -24,7 +24,7 @@ namespace Personal.FinOpsApi.AzureFunctions.Functions
         public async Task<HttpResponseData> AnalyzeDuplicateResources(
             [HttpTrigger(AuthorizationLevel.Function, "post")] HttpRequestData req)
         {
-            _logger.LogInformation("🔍 Iniciando análise de recursos duplicados em múltiplas assinaturas");
+            _logger.LogInformation(" Iniciando análise de recursos duplicados em múltiplas assinaturas");
 
             try
             {
@@ -40,7 +40,7 @@ namespace Personal.FinOpsApi.AzureFunctions.Functions
                     return await CreateErrorResponse(req, "Lista de assinaturas é obrigatória", HttpStatusCode.BadRequest);
                 }
 
-                _logger.LogInformation("📊 Analisando {Count} assinaturas: {Subscriptions}", 
+                _logger.LogInformation(" Analisando {Count} assinaturas: {Subscriptions}", 
                     request.SubscriptionIds.Count, string.Join(", ", request.SubscriptionIds));
 
                 // Executar análise
@@ -70,7 +70,7 @@ namespace Personal.FinOpsApi.AzureFunctions.Functions
                         .ToList()
                 };
 
-                _logger.LogInformation("✅ Análise concluída: {Groups} grupos, {Resources} recursos, ${Savings:F2} economia potencial", 
+                _logger.LogInformation(" Análise concluída: {Groups} grupos, {Resources} recursos, ${Savings:F2} economia potencial", 
                     summary.TotalDuplicateGroups, 
                     summary.TotalDuplicateResources, 
                     summary.TotalPotentialSavings);
@@ -87,7 +87,7 @@ namespace Personal.FinOpsApi.AzureFunctions.Functions
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "❌ Erro durante análise de recursos duplicados");
+                _logger.LogError(ex, " Erro durante análise de recursos duplicados");
                 return await CreateErrorResponse(req, "Erro interno do servidor", HttpStatusCode.InternalServerError);
             }
         }

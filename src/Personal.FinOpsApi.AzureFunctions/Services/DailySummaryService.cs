@@ -16,6 +16,7 @@ public class DailySummaryService
     private readonly IConfiguration _configuration;
     private readonly ILogger<DailySummaryService> _logger;
     private readonly CostAnalysisOrchestrator _orchestrator;
+    private readonly bool _enableSummaryStorage;
     
     private readonly JsonSerializerOptions _jsonOptions;
 
@@ -29,6 +30,7 @@ public class DailySummaryService
         _configuration = configuration;
         _logger = logger;
         _orchestrator = orchestrator;
+        _enableSummaryStorage = configuration.GetValue("ENABLE_SUMMARY_STORAGE", false);
         
         _jsonOptions = new JsonSerializerOptions
         {
@@ -43,13 +45,13 @@ public class DailySummaryService
     /// </summary>
     public async Task<DailySummary> ProcessDayAsync(string date)
     {
-        _logger.LogInformation("📊 Iniciando agregação diária para {date}", date);
+        _logger.LogInformation(" Iniciando agregação diária para {date}", date);
 
         try
         {
             // 1. Ler todos os findings do dia
             var allFindings = await ReadAllFindingsAsync(date);
-            _logger.LogInformation("📥 Carregados {count} cost findings", allFindings.Count);
+            _logger.LogInformation(" Carregados {count} cost findings", allFindings.Count);
 
             // 2. Calcular agregações
             var summary = await CalculateSummaryAsync(date, allFindings);
@@ -65,19 +67,19 @@ public class DailySummaryService
             if (top10 != null)
             {
                 await SaveTop10Async(date, top10);
-                _logger.LogInformation("📈 Top 10 salvo com {count} itens", top10.Top10?.Count ?? 0);
+                _logger.LogInformation(" Top 10 salvo com {count} itens", top10.Top10?.Count ?? 0);
             }
             else
             {
-                _logger.LogWarning("⚠️ Top 10 não gerado - nenhuma recomendação encontrada para {date}", date);
+                _logger.LogWarning(" Top 10 não gerado - nenhuma recomendação encontrada para {date}", date);
             }
             
-            _logger.LogInformation("✅ Summary gerado: {totalSavings:C} de economia potencial", summary.TotalPotentialSavings);
+            _logger.LogInformation(" Summary gerado: {totalSavings:C} de economia potencial", summary.TotalPotentialSavings);
             return summary;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Erro ao processar summary do dia {date}", date);
+            _logger.LogError(ex, " Erro ao processar summary do dia {date}", date);
             throw;
         }
     }
@@ -94,18 +96,18 @@ public class DailySummaryService
             var containerName = _configuration["RESULTS_CONTAINER_NAME"] ?? "finops-analysis";
             var containerClient = _blobServiceClient.GetBlobContainerClient(containerName);
             
-            // 🎯 FASE B - Usar BlobPathBuilder padronizado para analyses/
+            //  FASE B - Usar BlobPathBuilder padronizado para analyses/
             var analysisDate = DateTime.ParseExact(date, "yyyy-MM-dd", null);
             var prefix = BlobPathBuilder.BuildAnalysesDailyPrefix(analysisDate);
             
-            _logger.LogInformation("🔍 Buscando análises com prefixo: {prefix}", prefix);
+            _logger.LogInformation(" Buscando análises com prefixo: {prefix}", prefix);
 
             await foreach (var blobItem in containerClient.GetBlobsAsync(prefix: prefix))
             {
-                // 🎯 FILTRAR APENAS recommendations.json (não raw-analysis.json)
+                //  FILTRAR APENAS recommendations.json (não raw-analysis.json)
                 if (!blobItem.Name.EndsWith("recommendations.json"))
                 {
-                    _logger.LogDebug("⏭️ Ignorando blob: {blobName}", blobItem.Name);
+                    _logger.LogDebug("⏭ Ignorando blob: {blobName}", blobItem.Name);
                     continue;
                 }
 
@@ -115,7 +117,7 @@ public class DailySummaryService
                     var content = await blobClient.DownloadContentAsync();
                     var contentStr = content.Value.Content.ToString();
                     
-                    // 🎯 NOVO FORMATO: recommendations.json tem estrutura { recommendations: [...] }
+                    //  NOVO FORMATO: recommendations.json tem estrutura { recommendations: [...] }
                     using var doc = JsonDocument.Parse(contentStr);
                     var root = doc.RootElement;
                     
@@ -147,23 +149,23 @@ public class DailySummaryService
                             allFindings.Add(finding);
                         }
                         
-                        _logger.LogDebug("📄 Processado blob: {name} ({count} findings)", blobItem.Name, recommendations.Count);
+                        _logger.LogDebug(" Processado blob: {name} ({count} findings)", blobItem.Name, recommendations.Count);
                         }
                     }
                     else
                     {
-                        _logger.LogWarning("📄 Blob {name} não contém estrutura 'recommendations' esperada", blobItem.Name);
+                        _logger.LogWarning(" Blob {name} não contém estrutura 'recommendations' esperada", blobItem.Name);
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "⚠️ Erro ao processar blob {name}", blobItem.Name);
+                    _logger.LogWarning(ex, " Erro ao processar blob {name}", blobItem.Name);
                 }
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Erro ao ler findings do dia {date}", date);
+            _logger.LogError(ex, " Erro ao ler findings do dia {date}", date);
         }
 
         return allFindings;
@@ -215,7 +217,7 @@ public class DailySummaryService
             .Take(10)
             .ToList();
 
-        _logger.LogInformation("📈 Calculado summary: {types} tipos, {subs} subscriptions, Top savings: {topSaving:C}", 
+        _logger.LogInformation(" Calculado summary: {types} tipos, {subs} subscriptions, Top savings: {topSaving:C}", 
             byType.Count, bySubscription.Count, summary.Top10.FirstOrDefault()?.PotentialSavings ?? 0);
 
         return await Task.FromResult(summary);
@@ -226,13 +228,19 @@ public class DailySummaryService
     /// </summary>
     private async Task SaveSummaryAsync(DailySummary summary)
     {
+        if (!_enableSummaryStorage)
+        {
+            _logger.LogInformation(" Summary storage desabilitado. Pulando save de summary.json.");
+            return;
+        }
+
         try
         {
             var containerName = _configuration["RESULTS_CONTAINER_NAME"] ?? "finops-analysis";
             var containerClient = _blobServiceClient.GetBlobContainerClient(containerName);
             await containerClient.CreateIfNotExistsAsync();
 
-            // 🎯 FASE B - Path padronizado para summary
+            //  FASE B - Path padronizado para summary
             var summaryDate = DateTime.ParseExact(summary.Date, "yyyy-MM-dd", null);
             var blobName = BlobPathBuilder.BuildDailySummaryPath(summaryDate);
             
@@ -243,20 +251,26 @@ public class DailySummaryService
             
             await blobClient.UploadAsync(stream, overwrite: true);
             
-            _logger.LogInformation("💾 Summary salvo em: {blobName}", blobName);
+            _logger.LogInformation(" Summary salvo em: {blobName}", blobName);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Erro ao salvar summary");
+            _logger.LogError(ex, " Erro ao salvar summary");
             throw;
         }
     }
 
     /// <summary>
-    /// 🏆 Salva Top 10 diário
+    ///  Salva Top 10 diário
     /// </summary>
     public async Task SaveTop10Async(string date, DailyTop10Result top10Result)
     {
+        if (!_enableSummaryStorage)
+        {
+            _logger.LogInformation(" Summary storage desabilitado. Pulando save de top10.json.");
+            return;
+        }
+
         try
         {
             var containerName = _configuration["RESULTS_CONTAINER_NAME"] ?? "finops-analysis";
@@ -270,12 +284,12 @@ public class DailySummaryService
             
             await blobClient.UploadAsync(stream, overwrite: true);
             
-            _logger.LogInformation("🏆 Top 10 salvo em: {blobName} ({count} economias)", 
+            _logger.LogInformation(" Top 10 salvo em: {blobName} ({count} economias)", 
                 blobName, top10Result.Top10.Count);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Erro ao salvar Top 10");
+            _logger.LogError(ex, " Erro ao salvar Top 10");
             throw;
         }
     }

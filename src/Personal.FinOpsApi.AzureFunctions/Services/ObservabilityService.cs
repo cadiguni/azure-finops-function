@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging;
 namespace Personal.FinOpsApi.AzureFunctions.Services;
 
 /// <summary>
-/// 📊 OBSERVABILIDADE ENTERPRISE - Métricas de negócio FinOps
+///  OBSERVABILIDADE ENTERPRISE - Métricas de negócio FinOps
 /// 
 /// Coleta métricas essenciais:
 /// - TotalSavingsFound
@@ -12,13 +12,13 @@ namespace Personal.FinOpsApi.AzureFunctions.Services;
 /// - AzureMonitorCalls
 /// - ErrorRates
 /// 
-/// Isso vira dashboard de saúde do sistema 📈
+/// Isso vira dashboard de saúde do sistema 
 /// </summary>
 public class ObservabilityService
 {
     private readonly ILogger<ObservabilityService> _logger;
     
-    // 📊 Métricas em memória (em produção usar Application Insights Custom Metrics)
+    //  Métricas em memória (em produção usar Application Insights Custom Metrics)
     private readonly Dictionary<string, double> _metrics = new();
     private readonly Dictionary<string, int> _counters = new();
     private readonly List<AnalyzerExecutionMetric> _executionHistory = new();
@@ -30,7 +30,7 @@ public class ObservabilityService
     }
 
     /// <summary>
-    /// 💰 Registra economia encontrada por analyzer
+    ///  Registra economia encontrada por analyzer
     /// </summary>
     public void RecordSavingsFound(string analyzerType, decimal savingsAmount, string currency = "BRL")
     {
@@ -38,12 +38,12 @@ public class ObservabilityService
         _metrics[metricKey] = _metrics.GetValueOrDefault(metricKey, 0) + (double)savingsAmount;
         _metrics["TotalSavingsFound"] = _metrics.GetValueOrDefault("TotalSavingsFound", 0) + (double)savingsAmount;
 
-        _logger.LogInformation("💰 {analyzer}: R$ {savings:F2} em economias encontradas", 
+        _logger.LogInformation(" {analyzer}: R$ {savings:F2} em economias encontradas", 
             analyzerType, savingsAmount);
     }
 
     /// <summary>
-    /// ⏱️ Registra tempo de execução de analyzer
+    /// ⏱ Registra tempo de execução de analyzer
     /// </summary>
     public void RecordAnalyzerExecutionTime(string analyzerType, TimeSpan executionTime, bool success = true)
     {
@@ -66,12 +66,12 @@ public class ObservabilityService
         var metricKey = $"AnalyzerExecutionTime_{analyzerType}";
         _metrics[metricKey] = executionTime.TotalMilliseconds;
 
-        _logger.LogInformation("⏱️ {analyzer} executado em {duration}ms - {status}", 
+        _logger.LogInformation("⏱ {analyzer} executado em {duration}ms - {status}", 
             analyzerType, executionTime.TotalMilliseconds, success ? "SUCCESS" : "FAILED");
     }
 
     /// <summary>
-    /// 📋 Registra subscription processada
+    ///  Registra subscription processada
     /// </summary>
     public void RecordSubscriptionProcessed(string subscriptionId, string analyzerType, int findingsCount)
     {
@@ -81,12 +81,12 @@ public class ObservabilityService
         var analyzerCounterKey = $"SubscriptionsProcessed_{analyzerType}";
         _counters[analyzerCounterKey] = _counters.GetValueOrDefault(analyzerCounterKey, 0) + 1;
 
-        _logger.LogDebug("📋 Subscription {sub} processada por {analyzer}: {findings} findings", 
+        _logger.LogDebug(" Subscription {sub} processada por {analyzer}: {findings} findings", 
             subscriptionId, analyzerType, findingsCount);
     }
 
     /// <summary>
-    /// 🔵 Registra chamada para Azure Monitor API
+    ///  Registra chamada para Azure Monitor API
     /// </summary>
     public void RecordAzureMonitorCall(string metricType, bool success = true, TimeSpan? duration = null)
     {
@@ -105,12 +105,12 @@ public class ObservabilityService
             _metrics[durationKey] = duration.Value.TotalMilliseconds;
         }
 
-        _logger.LogDebug("🔵 Azure Monitor call: {metric} - {status} ({duration}ms)", 
+        _logger.LogDebug(" Azure Monitor call: {metric} - {status} ({duration}ms)", 
             metricType, success ? "SUCCESS" : "FAILED", duration?.TotalMilliseconds ?? 0);
     }
 
     /// <summary>
-    /// 🎯 Registra erro geral do sistema
+    ///  Registra erro geral do sistema
     /// </summary>
     public void RecordError(string component, Exception exception)
     {
@@ -119,11 +119,11 @@ public class ObservabilityService
         
         _counters["TotalErrors"] = _counters.GetValueOrDefault("TotalErrors", 0) + 1;
 
-        _logger.LogError(exception, "❌ Erro em {component}: {error}", component, exception.Message);
+        _logger.LogError(exception, " Erro em {component}: {error}", component, exception.Message);
     }
 
     /// <summary>
-    /// 📈 Obtém métricas consolidadas para dashboard
+    ///  Obtém métricas consolidadas para dashboard
     /// </summary>
     public SystemHealthMetrics GetSystemHealth()
     {
@@ -150,7 +150,7 @@ public class ObservabilityService
     }
 
     /// <summary>
-    /// 📊 Obtém métricas detalhadas por analyzer
+    ///  Obtém métricas detalhadas por analyzer
     /// </summary>
     public Dictionary<string, object> GetDetailedMetrics()
     {
@@ -176,7 +176,7 @@ public class ObservabilityService
     }
 
     /// <summary>
-    /// 🔄 Inicializa métricas zeradas
+    ///  Inicializa métricas zeradas
     /// </summary>
     private void InitializeMetrics()
     {
@@ -187,7 +187,7 @@ public class ObservabilityService
     }
 
     /// <summary>
-    /// 🧹 Reset métricas (útil para testes)
+    ///  Reset métricas (útil para testes)
     /// </summary>
     public void ResetMetrics()
     {
@@ -196,12 +196,12 @@ public class ObservabilityService
         _executionHistory.Clear();
         InitializeMetrics();
         
-        _logger.LogInformation("🧹 Métricas resetadas");
+        _logger.LogInformation(" Métricas resetadas");
     }
 }
 
 /// <summary>
-/// ⏱️ Métrica de execução de analyzer individual
+/// ⏱ Métrica de execução de analyzer individual
 /// </summary>
 public class AnalyzerExecutionMetric
 {
@@ -212,7 +212,7 @@ public class AnalyzerExecutionMetric
 }
 
 /// <summary>
-/// 💊 Métricas de saúde do sistema
+///  Métricas de saúde do sistema
 /// </summary>
 public class SystemHealthMetrics
 {

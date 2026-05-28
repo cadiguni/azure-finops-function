@@ -7,8 +7,8 @@ using Personal.FinOpsApi.AzureFunctions.Models;
 namespace Personal.FinOpsApi.AzureFunctions.Services;
 
 /// <summary>
-/// 📊 LOG ANALYTICS DATA COLLECTOR API: Serviço simplificado para enviar recomendações FinOps
-/// 🎯 Usa Data Collector API (Opção A) - mais simples que DCR/DCE
+///  LOG ANALYTICS DATA COLLECTOR API: Serviço simplificado para enviar recomendações FinOps
+///  Usa Data Collector API (Opção A) - mais simples que DCR/DCE
 /// 
 /// Setup necessário:
 /// 1. Log Analytics Workspace
@@ -16,10 +16,10 @@ namespace Personal.FinOpsApi.AzureFunctions.Services;
 /// 3. Variáveis de ambiente (sem DCR/DCE)
 /// 
 /// Benefícios:
-/// ✅ Setup muito mais simples
-/// ✅ Funciona imediatamente 
-/// ✅ Não precisa de DCR/DCE
-/// ✅ Mesmas funcionalidades de dashboard/KQL
+///  Setup muito mais simples
+///  Funciona imediatamente 
+///  Não precisa de DCR/DCE
+///  Mesmas funcionalidades de dashboard/KQL
 /// </summary>
 public class LogAnalyticsDataCollectorService
 {
@@ -34,7 +34,7 @@ public class LogAnalyticsDataCollectorService
     {
         _logger = logger;
 
-        // 📋 CONFIGURAÇÃO: Obtém configurações do environment (muito mais simples)
+        //  CONFIGURAÇÃO: Obtém configurações do environment (muito mais simples)
         _workspaceId = Environment.GetEnvironmentVariable("LOG_ANALYTICS_WORKSPACE_ID");
         _sharedKey = Environment.GetEnvironmentVariable("LOG_ANALYTICS_SHARED_KEY");
         _logType = Environment.GetEnvironmentVariable("LOG_ANALYTICS_LOG_TYPE") ?? "FinOpsRecommendations";
@@ -43,17 +43,17 @@ public class LogAnalyticsDataCollectorService
 
         if (!_isEnabled)
         {
-            _logger.LogWarning("⚠️ LOG ANALYTICS DESABILITADO: WORKSPACE_ID ou SHARED_KEY não configurados");
+            _logger.LogWarning(" LOG ANALYTICS DESABILITADO: WORKSPACE_ID ou SHARED_KEY não configurados");
         }
         else
         {
-            _logger.LogInformation("✅ LOG ANALYTICS (Data Collector API) configurado - Workspace: {workspaceId}, LogType: {logType}", 
+            _logger.LogInformation(" LOG ANALYTICS (Data Collector API) configurado - Workspace: {workspaceId}, LogType: {logType}", 
                 _workspaceId, _logType);
         }
     }
 
     /// <summary>
-    /// 🚀 ENVIO PRINCIPAL: Envia recomendações FinOps para Log Analytics via Data Collector API
+    ///  ENVIO PRINCIPAL: Envia recomendações FinOps para Log Analytics via Data Collector API
     /// </summary>
     public async Task<bool> SendRecommendationsAsync(
         List<FinOpsLogEntry> recommendations,
@@ -62,34 +62,34 @@ public class LogAnalyticsDataCollectorService
     {
         if (!_isEnabled)
         {
-            _logger.LogDebug("📊 Log Analytics desabilitado - pulando envio de {count} recomendações", recommendations.Count);
+            _logger.LogDebug(" Log Analytics desabilitado - pulando envio de {count} recomendações", recommendations.Count);
             return false;
         }
 
         if (!recommendations.Any())
         {
-            _logger.LogDebug("📊 Nenhuma recomendação para enviar ao Log Analytics");
+            _logger.LogDebug(" Nenhuma recomendação para enviar ao Log Analytics");
             return true;
         }
 
         try
         {
-            _logger.LogInformation("📊 Enviando {count} recomendações para Log Analytics via Data Collector API (análise: {analysisId})", 
+            _logger.LogInformation(" Enviando {count} recomendações para Log Analytics via Data Collector API (análise: {analysisId})", 
                 recommendations.Count, analysisId);
 
-            // 📤 SERIALIZAR payload
+            //  SERIALIZAR payload
             var jsonPayload = JsonSerializer.Serialize(recommendations, new JsonSerializerOptions
             {
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
                 WriteIndented = false // Compacto para reduzir tamanho
             });
 
-            // 🚀 ENVIAR via Data Collector API
+            //  ENVIAR via Data Collector API
             await SendToDataCollectorAsync(_logType, jsonPayload, cancellationToken);
             
-            _logger.LogInformation("✅ {count} recomendações enviadas com sucesso para Log Analytics", recommendations.Count);
+            _logger.LogInformation(" {count} recomendações enviadas com sucesso para Log Analytics", recommendations.Count);
             
-            // 📊 LOG DETALHADO: Breakdown por tipo para monitoramento
+            //  LOG DETALHADO: Breakdown por tipo para monitoramento
             var breakdown = recommendations
                 .GroupBy(r => r.RecommendationType)
                 .ToDictionary(g => g.Key, g => new { 
@@ -99,7 +99,7 @@ public class LogAnalyticsDataCollectorService
 
             foreach (var item in breakdown)
             {
-                _logger.LogInformation("📈 {type}: {count} recomendações, ${savings:F2}/mês economia", 
+                _logger.LogInformation(" {type}: {count} recomendações, ${savings:F2}/mês economia", 
                     item.Key, item.Value.count, item.Value.totalSavings);
             }
 
@@ -107,13 +107,13 @@ public class LogAnalyticsDataCollectorService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Erro ao enviar recomendações para Log Analytics");
+            _logger.LogError(ex, " Erro ao enviar recomendações para Log Analytics");
             return false;
         }
     }
 
     /// <summary>
-    /// 🔄 CONVERTER: Transforma StandardAnalyzerResult em FinOpsLogEntry para Log Analytics
+    ///  CONVERTER: Transforma StandardAnalyzerResult em FinOpsLogEntry para Log Analytics
     /// </summary>
     public List<FinOpsLogEntry> ConvertToLogEntries(
         StandardAnalyzerResult analyzerResult,
@@ -155,7 +155,7 @@ public class LogAnalyticsDataCollectorService
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "⚠️ Erro ao converter finding {resourceId} para LogEntry", finding.ResourceId);
+                _logger.LogWarning(ex, " Erro ao converter finding {resourceId} para LogEntry", finding.ResourceId);
             }
         }
 
@@ -163,14 +163,14 @@ public class LogAnalyticsDataCollectorService
     }
 
     /// <summary>
-    /// 📤 CORE: Envia dados via Data Collector API com autenticação HMAC
+    ///  CORE: Envia dados via Data Collector API com autenticação HMAC
     /// </summary>
     private async Task SendToDataCollectorAsync(string logType, string jsonPayload, CancellationToken cancellationToken)
     {
         var date = DateTime.UtcNow.ToString("r");
         var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
 
-        // 🔐 GERAR ASSINATURA HMAC
+        //  GERAR ASSINATURA HMAC
         var signature = BuildHmacSignature(
             "POST",
             content.Headers.ContentLength!.Value,
@@ -178,7 +178,7 @@ public class LogAnalyticsDataCollectorService
             date,
             "/api/logs");
 
-        // 🌐 PREPARAR REQUEST
+        //  PREPARAR REQUEST
         var uri = $"https://{_workspaceId}.ods.opinsights.azure.com/api/logs?api-version=2016-04-01";
         
         HttpClient.DefaultRequestHeaders.Clear();
@@ -186,8 +186,8 @@ public class LogAnalyticsDataCollectorService
         HttpClient.DefaultRequestHeaders.Add("Log-Type", logType);
         HttpClient.DefaultRequestHeaders.Add("x-ms-date", date);
 
-        // 🚀 ENVIAR
-        _logger.LogDebug("📤 Enviando para Data Collector API: {uri}", uri);
+        //  ENVIAR
+        _logger.LogDebug(" Enviando para Data Collector API: {uri}", uri);
         var response = await HttpClient.PostAsync(uri, content, cancellationToken);
 
         if (!response.IsSuccessStatusCode)
@@ -198,7 +198,7 @@ public class LogAnalyticsDataCollectorService
     }
 
     /// <summary>
-    /// 🔐 HMAC: Gera assinatura HMAC SHA256 para autenticação do Data Collector API
+    ///  HMAC: Gera assinatura HMAC SHA256 para autenticação do Data Collector API
     /// </summary>
     private string BuildHmacSignature(string method, long contentLength, string contentType, string date, string resource)
     {
@@ -215,7 +215,7 @@ public class LogAnalyticsDataCollectorService
     }
 
     /// <summary>
-    /// 🔍 HELPER: Extrai nome do Resource Group do resourceId
+    ///  HELPER: Extrai nome do Resource Group do resourceId
     /// </summary>
     private static string ExtractResourceGroupName(string resourceId)
     {
@@ -232,7 +232,7 @@ public class LogAnalyticsDataCollectorService
     }
 
     /// <summary>
-    /// 🔍 HELPER: Extrai nome do recurso do resourceId
+    ///  HELPER: Extrai nome do recurso do resourceId
     /// </summary>
     private static string ExtractResourceName(string resourceId)
     {
@@ -247,7 +247,7 @@ public class LogAnalyticsDataCollectorService
     }
 
     /// <summary>
-    /// 🎯 MAPPING: Mapeia tipo do analyzer para tipo de recomendação
+    ///  MAPPING: Mapeia tipo do analyzer para tipo de recomendação
     /// </summary>
     private static string DetermineRecommendationType(string analyzerType)
     {
@@ -264,7 +264,7 @@ public class LogAnalyticsDataCollectorService
     }
 
     /// <summary>
-    /// 📊 CATEGORIAS: Mapeia tipo de recurso para categoria
+    ///  CATEGORIAS: Mapeia tipo de recurso para categoria
     /// </summary>
     private static string DetermineCategory(string resourceType)
     {
@@ -279,7 +279,7 @@ public class LogAnalyticsDataCollectorService
     }
 
     /// <summary>
-    /// 🎯 AÇÕES: Mapeia analyzer para ação recomendada
+    ///  AÇÕES: Mapeia analyzer para ação recomendada
     /// </summary>
     private static string DetermineAction(string analyzerType)
     {
@@ -296,7 +296,7 @@ public class LogAnalyticsDataCollectorService
     }
 
     /// <summary>
-    /// 🎯 CONFIDENCE: Calcula confidence score baseado no tipo e métricas
+    ///  CONFIDENCE: Calcula confidence score baseado no tipo e métricas
     /// </summary>
     private static int DetermineConfidenceScore(string analyzerType, StandardFinding finding)
     {
@@ -319,7 +319,7 @@ public class LogAnalyticsDataCollectorService
     }
 
     /// <summary>
-    /// 🏷️ SERIALIZAÇÃO: Converte tags para JSON string
+    ///  SERIALIZAÇÃO: Converte tags para JSON string
     /// </summary>
     private static string SerializeTags(Dictionary<string, string>? tags)
     {
@@ -336,7 +336,7 @@ public class LogAnalyticsDataCollectorService
     }
 
     /// <summary>
-    /// 📊 SERIALIZAÇÃO: Converte métricas para JSON string
+    ///  SERIALIZAÇÃO: Converte métricas para JSON string
     /// </summary>
     private static string SerializeMetrics(Dictionary<string, object>? metrics)
     {

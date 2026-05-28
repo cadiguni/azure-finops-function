@@ -8,9 +8,9 @@ using System.Text.Json;
 namespace Personal.FinOpsApi.AzureFunctions.Functions;
 
 /// <summary>
-/// 📊 FINOPS DATA READER - Function HTTP para consumir dados das análises
+///  FINOPS DATA READER - Function HTTP para consumir dados das análises
 /// 
-/// 🎯 ENDPOINTS:
+///  ENDPOINTS:
 /// GET /api/finops/data?date=2026-02-12&type=summary
 /// GET /api/finops/data?date=2026-02-12&subscription=xxx&type=raw
 /// GET /api/finops/data?date=2026-02-12&type=subscriptions
@@ -96,12 +96,12 @@ public class FinOpsDataReaderFunction
                     break;
             }
 
-            _logger.LogInformation("✅ Dados FinOps retornados: tipo={type}, date={date}", typeParam, date);
+            _logger.LogInformation(" Dados FinOps retornados: tipo={type}, date={date}", typeParam, date);
             return response;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ Erro ao obter dados FinOps");
+            _logger.LogError(ex, " Erro ao obter dados FinOps");
             var errorResponse = req.CreateResponse(HttpStatusCode.InternalServerError);
             await errorResponse.WriteStringAsync($"{{\"error\":\"{ex.Message}\"}}");
             return errorResponse;
