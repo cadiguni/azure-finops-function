@@ -1,183 +1,42 @@
 # Azure FinOps Platform
 
-Plataforma FinOps para Azure criada como projeto de portfolio pessoal. O objetivo e demonstrar uma arquitetura serverless capaz de coletar custos reais, executar analises de otimizacao, detectar anomalias e expor os resultados em API, dashboard web, Grafana e relatorios pre-gerados.
+Plataforma FinOps para Azure: coleta custos reais via Cost Management, identifica oportunidades de economia, detecta anomalias, gera relatórios e organiza ownership de subscriptions por time — com um backend serverless em .NET e um portal web em React.
 
-Todos os nomes, dominios, e-mails, pools de agente e dados corporativos foram removidos. Os exemplos deste README usam valores ficticios.
+## Visão geral
 
-## Visao Geral
+- **Backend**: Azure Functions (.NET 8, isolated worker) — coleta de custos, análise de subutilização, detecção de anomalias, geração de relatórios e APIs para o portal.
+- **Frontend**: React 19 + TypeScript + Vite (`frontend/finops-portal`) — portal para visualizar custos, recomendações, anomalias e administrar ownership.
+- **Armazenamento**: modelo híbrido — Blob Storage para snapshots/relatórios/exports, Cosmos DB para dados operacionais editáveis (status de recomendação, ownership, audit logs).
+- **Integrações Azure**: Cost Management (Exports + Query API), Resource Graph, Service Bus, Application Insights, Log Analytics, Entra ID (SSO).
 
-- Backend em Azure Functions isolated worker com .NET 8.
-- Processamento assíncrono com Service Bus para analisar multiplas subscriptions em paralelo.
-- Coleta de custos via Azure Cost Management API, com armazenamento historico em Blob Storage.
-- Analyzers para recursos ociosos, subutilizados ou sem dono.
-- Frontend React/Vite para dashboard, recomendacoes, anomalias, ownership e relatorios.
-- Relatorios HTML/CSV/PDF pre-gerados para reduzir latencia em consultas recorrentes.
-- Terraform e pipelines de CI/CD para backend e frontend.
-- Testes unitarios cobrindo analyzers, servicos e endpoints principais.
+## Estrutura do repositório
 
-## Arquitetura
-
-```mermaid
-flowchart LR
-    subgraph Azure["Azure"]
-        Timer["Timer Functions"]
-        Http["HTTP APIs"]
-        Bus["Service Bus Queues"]
-        Blob["Blob Storage"]
-        AppInsights["Application Insights"]
-        CostApi["Cost Management API"]
-        Monitor["Azure Monitor"]
-        Graph["Azure Resource Graph"]
-    end
-
-    subgraph Backend["Azure Functions (.NET 8)"]
-        Discovery["Subscription Discovery"]
-        CostJobs["Cost Collectors"]
-        Analyzers["FinOps Analyzers"]
-        Anomaly["Anomaly Detection"]
-        Reports["Report Generation"]
-        Api["Frontend/Grafana APIs"]
-    end
-
-    subgraph Clients["Consumo"]
-        Portal["React FinOps Portal"]
-        Grafana["Grafana Dashboards"]
-        ReportsUi["HTML/CSV/PDF Reports"]
-    end
-
-    Timer --> Discovery
-    Discovery --> Bus
-    Bus --> CostJobs
-    Bus --> Analyzers
-    CostJobs --> CostApi
-    Analyzers --> Graph
-    Analyzers --> Monitor
-    CostJobs --> Blob
-    Analyzers --> Blob
-    Anomaly --> Blob
-    Reports --> Blob
-    Http --> Api
-    Api --> Blob
-    Api --> AppInsights
-    Portal --> Http
-    Grafana --> Http
-    ReportsUi --> Http
 ```
-
-## Fluxo de Dados
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant T as Timer
-    participant Q as Service Bus
-    participant F as Function Worker
-    participant A as Azure APIs
-    participant B as Blob Storage
-    participant UI as Portal/Grafana
-
-    T->>Q: Enfileira subscriptions e escopos
-    Q->>F: Processa em paralelo
-    F->>A: Consulta custos, metricas e Resource Graph
-    A-->>F: Retorna consumo e inventario
-    F->>B: Salva resultados normalizados
-    UI->>F: Consulta dashboard, recomendacoes ou relatorios
-    F->>B: Le dados consolidados
-    F-->>UI: Retorna JSON, HTML, CSV ou PDF
-```
-
-## Funcionalidades
-
-| Area | Implementacao |
-|------|---------------|
-| Custo por servico | Coleta diaria por subscription e servico, com tendencia historica. |
-| Custo por recurso | Coleta granular para associar gasto a recursos especificos. |
-| Recomendacoes FinOps | Identifica discos orfaos, IPs publicos sem uso, VMs ociosas, App Services e Storage Accounts subutilizados. |
-| Anomalias | Analisa variacao diaria de custo e sinaliza desvios relevantes. |
-| Ownership | Relaciona times e subscriptions para relatorios por area responsavel. |
-| Relatorios | Gera HTML pre-renderizado, CSV e PDF a partir dos achados consolidados. |
-| Grafana API | Endpoints otimizados para paineis externos. |
-| Portal web | Dashboard React com paginas de custos, recomendacoes, anomalias, ownership e relatorios. |
-
-## Estrutura
-
-```text
 src/
-  Personal.FinOpsApi.AzureFunctions/
-    Analyzers/      # Regras de otimizacao de recursos Azure
-    Functions/      # Timers, filas e APIs HTTP
-    Models/         # Contratos de entrada, saida e armazenamento
-    Services/       # Cost Management, Blob, relatorios, anomalias e observabilidade
-frontend/
-  finops-portal/    # React + Vite
-pipelines/
-  terraform-function/
-  terraform-frontend/
-docs/
+  Personal.FinOpsApi.AzureFunctions/   # Projeto principal do backend (Functions)
 tests/
+  Unit/                              # Testes xUnit/Moq/FluentAssertions do backend
+  PowerShell/                        # Testes Pester dos scripts (Initialize-CostExports, Terraform)
+frontend/
+  finops-portal/                     # Portal React (SPA)
+scripts/
+  Initialize-CostExports.ps1         # Bootstrap dos Cost Management Exports
+pipelines/                           # Pipelines Azure DevOps (build/deploy/infra) + Terraform
+docs/                                # Documentação detalhada por feature/migração
+wiki/                                # Índice adicional de documentação
 ```
 
-## Exemplos Ficticios
+## Como começar
 
-### Resumo de custos
-
-| Indicador | Valor |
-|-----------|-------|
-| Custo mensal analisado | R$ 84.320,00 |
-| Economia potencial | R$ 13.870,00 |
-| Subscriptions analisadas | 12 |
-| Recursos avaliados | 1.438 |
-| Recomendacoes abertas | 47 |
-
-### Recomendacoes
-
-| Tipo | Recurso | Evidencia | Economia estimada |
-|------|---------|-----------|-------------------|
-| Disco orfao | `disk-vm-lab-001` | Sem VM associada ha 21 dias | R$ 184,00/mes |
-| VM ociosa | `vm-batch-dev-02` | CPU media menor que 3% em 14 dias | R$ 620,00/mes |
-| App Service | `asp-internal-tools` | CPU menor que 5% e baixa memoria | R$ 410,00/mes |
-| Public IP | `pip-old-gateway` | IP sem associacao ativa | R$ 32,00/mes |
-
-### Anomalias
-
-| Data | Servico | Variacao | Hipotese |
-|------|---------|----------|----------|
-| 2026-05-12 | Azure SQL Database | +38% | Aumento de DTU durante carga pontual |
-| 2026-05-18 | Azure App Service | +24% | Scale-out acima do padrao diario |
-
-## Endpoints Principais
-
-| Endpoint | Uso |
-|----------|-----|
-| `GET /api/SystemHealth` | Health check operacional. |
-| `GET /api/GrafanaCostByService?date=YYYY-MM-DD&subscription=all` | Custo por servico no dia. |
-| `GET /api/GrafanaCostTrendByService?from=YYYY-MM-DD&to=YYYY-MM-DD` | Serie historica por servico. |
-| `GET /api/report/html?date=YYYY-MM-DD` | Relatorio HTML geral. |
-| `GET /api/report/html?date=YYYY-MM-DD&subscription={id}` | Relatorio por subscription. |
-| `GET /api/report/html?date=YYYY-MM-DD&team={id}` | Relatorio por time. |
-
-## Timers
-
-| Horario UTC | Timer | Descricao |
-|-------------|-------|-----------|
-| 09:10 | `CostByServiceDailyTimer` | Coleta custos por servico do dia anterior. |
-| 09:20 | `CostByResourceDailyTimer` | Coleta custos por recurso. |
-| 09:30 | `CostAnalysisTimer` | Executa analyzers de otimizacao. |
-| 11:00 | `CostAnomalyDailyTimer` | Detecta anomalias de custo. |
-| 11:30 | `DailySummary` | Consolida resumo diario. |
-| 12:00 | `PreGeneratedReportTimer` | Pre-gera relatorios HTML. |
-
-## Como Rodar Localmente
-
-Pre-requisitos:
+### Pré-requisitos
 
 - .NET SDK 8
 - Azure Functions Core Tools v4
-- Node.js 20+
-- Azurite ou uma connection string valida em `AzureWebJobsStorage`
-- Permissoes Azure: `Reader`, `Monitoring Reader`, `Cost Management Reader` e `Storage Blob Data Contributor`
+- Azurite (ou uma connection string válida em `AzureWebJobsStorage`)
+- Node.js 22.x (para o frontend — Vite 6.x; **não atualizar para Vite 8+** sem upgrade do Node)
+- Azure CLI (`az login`) para testes que dependem de APIs do Azure
 
-Backend:
+### Backend (Azure Functions)
 
 ```bash
 dotnet restore src/Personal.FinOpsApi.AzureFunctions/Personal.FinOpsApi.AzureFunctions.csproj
@@ -185,7 +44,9 @@ dotnet build src/Personal.FinOpsApi.AzureFunctions/Personal.FinOpsApi.AzureFunct
 func start --script-root src/Personal.FinOpsApi.AzureFunctions
 ```
 
-Frontend:
+Copie `local.settings.sample.json` para `local.settings.json` dentro de `src/Personal.FinOpsApi.AzureFunctions/` e ajuste os valores (veja [Configuração](#configuração)).
+
+### Frontend (portal)
 
 ```bash
 cd frontend/finops-portal
@@ -193,56 +54,191 @@ npm install
 npm run dev
 ```
 
-Testes:
+Acesse `http://localhost:5173/`. Copie `.env.example` para `.env.development` e ajuste as variáveis do Entra ID e `VITE_API_BASE_URL` (aponte para a Function local, ex.: `http://localhost:7071`). Detalhes de configuração e Redirect URIs em [frontend/finops-portal/README.md](frontend/finops-portal/README.md).
 
-```bash
-dotnet test FinOpsApi-Backend.sln
+## Configuração
+
+Principais App Settings do backend (local: `local.settings.json`; Azure: Application Settings, via Terraform):
+
+| Variável | Descrição |
+|---|---|
+| `AzureWebJobsStorage` | Connection string do storage da Function |
+| `FUNCTIONS_WORKER_RUNTIME` | `dotnet-isolated` |
+| `ServiceBusConnection` | Connection string do Service Bus |
+| `AZURE_SUBSCRIPTION_ID` | Subscription usada por padrão |
+| `RESULTS_CONTAINER_NAME` | Container de resultados de análise |
+| `ReportGenerationSchedule` | Cron para pré-gerar relatórios HTML |
+| `CostByServiceDailySchedule` | Cron da coleta diária de custo por serviço |
+| `COST_DATA_DELAY_DAYS` | Atraso (D-N) para aguardar consolidação do Cost Management (default `2`) |
+| `COST_EXPORT_CONTAINER` | Container dos arquivos brutos dos Cost Management Exports (default `cost-exports`) |
+| `EnableCostExportImport` | Habilita a ingestão agendada dos CSVs de Export |
+| `COST_EXPORT_IMPORT_ALL_SUBSCRIPTIONS` | Descobre automaticamente todos os prefixos `subscriptions/<id>/` no container |
+| `CostExportImportSchedule` | Cron da importação dos Exports (default a cada 2h) |
+| `COST_SUBSCRIPTIONS` | Lista CSV de subscriptions (vazio = discovery automático) |
+| `COST_STORAGE_CONTAINER` | Container de análises/custos (default `finops-analysis`) |
+| `CONFIG_CONTAINER_NAME` | Container de configuração — ownership e billing overrides (default `finops-config`) |
+
+Opcional (Log Analytics):
+
+| Variável | Descrição |
+|---|---|
+| `LOG_ANALYTICS_WORKSPACE_ID` | Workspace de destino |
+| `LOG_ANALYTICS_SHARED_KEY` | Chave compartilhada |
+| `LOG_ANALYTICS_LOG_TYPE` | Nome do log customizado |
+
+Providers do modelo híbrido de storage (primeiro deploy seguro):
+
+```json
+{
+  "StorageProvider": "Blob",
+  "OwnershipProvider": "Blob",
+  "RecommendationStatusProvider": "Cosmos",
+  "AuditLogProvider": "Cosmos",
+  "BillingPeriodOverridesBlobPath": "config/billing-period-overrides.json"
+}
 ```
 
-## Configuracao
+## Autenticação e autorização
 
-Use `src/Personal.FinOpsApi.AzureFunctions/local.settings.sample.json` como base para ambiente local.
+- O portal usa **SSO via Microsoft Entra ID (MSAL)** e envia um token Bearer para a API.
+- O **backend** é a autoridade de autorização (o frontend só ajusta a experiência de uso):
+  - `FinOps.Reader`: leitura (dashboard, recomendações, anomalias, relatórios, ownership).
+  - `FinOps.Admin`: leitura + alterações operacionais (status de recomendação, ownership, execução manual de anomalias, overrides de billing period).
+- Regras: não autenticado → `401`; autenticado sem role → `403`.
+- Grupos sugeridos no Entra ID: `GRP-FinOps-Readers` (role `FinOps.Reader`) e `GRP-FinOps-Admins` (role `FinOps.Admin`).
 
-Variaveis mais relevantes:
+## Funcionalidades e APIs
 
-- `AzureWebJobsStorage`
-- `FUNCTIONS_WORKER_RUNTIME=dotnet-isolated`
-- `ServiceBusConnection`
-- `AZURE_SUBSCRIPTION_ID`
-- `COST_SUBSCRIPTIONS`
-- `COST_STORAGE_CONTAINER`
-- `RESULTS_CONTAINER_NAME`
-- `CostByServiceDailySchedule`
-- `CostByResourceDailySchedule`
-- `CostAnalysisSchedule`
-- `CostAnomalyDailySchedule`
-- `DailySummarySchedule`
-- `ReportGenerationSchedule`
+### Custo por serviço e por recurso
 
-## Infraestrutura
+- `CostByServiceDailyTimer` / `CostByResourceDailyTimerFunction` (timers): coletam custo real do dia anterior via Cost Management API/Exports.
+- `GET /api/cost/by-service?date=YYYY-MM-DD&subscription=all`
+- `GET /api/cost/trend-by-service?from=YYYY-MM-DD&to=YYYY-MM-DD&subscription=all&service=<nome>`
+- `GET /api/cost/health`
+- `CostExportImportTimerFunction`: importa CSVs de Cost Management Exports do Blob a cada 2h (checkpoints evitam reprocessamento); ao importar manifesto novo, dispara análise de anomalias via Service Bus.
 
-O diretorio `pipelines/terraform-function` provisiona os recursos do backend:
+Storage: container `finops-analysis`, paths `cost/byService/date=YYYY-MM-DD/subscriptionId=<sub>/{byService,raw}.json`.
 
-- Resource Group
-- Function App
-- Storage Account
-- Managed Identity
-- Service Bus
-- Log Analytics Workspace
-- Application Insights
+### Relatórios versionados
 
-O diretorio `pipelines/terraform-frontend` provisiona o hosting estatico do portal.
+`PreGeneratedReportTimerFunction` gera HTML por timer e salva no Blob:
 
-## Espaco Para Screenshots
+```text
+reports/YYYY-MM-DD/general.html
+reports/YYYY-MM-DD/subscriptions/{subscriptionId}.html
+reports/YYYY-MM-DD/teams/{teamId}.html
+```
 
-Os prints do dashboard e das funcionalidades podem ser adicionados futuramente em `docs/screenshots/` e referenciados aqui:
+`GET /api/report/html` e `GET /api/report/csv` resolvem o mesmo snapshot imutável usado pelo Dashboard e renderizam o formato solicitado (`?date=`, `&subscription=` ou `&team=`). A data resolvida e a revisão são devolvidas nos headers `X-FinOps-*`. O timer mantém cópias HTML pré-geradas para distribuição/arquivo, mas elas não são a fonte canônica das APIs.
 
-- Dashboard executivo
-- Tendencia de custo por servico
-- Ranking de recomendacoes
-- Detalhe de anomalias
-- Relatorio HTML/PDF
+### Ownership Admin
 
-## Observacoes de Portfolio
+Vínculo entre subscription e time, com autorização por role (`FinOps.Reader` lê, `FinOps.Admin` altera):
 
-Este repositorio e uma versao sanitizada para demonstracao tecnica. Para evitar exposicao indevida, mantenha fora do Git qualquer arquivo com credenciais, nomes reais de tenants, subscriptions privadas, dominios internos ou dados financeiros reais.
+- `GET /api/ownership/teams`
+- `GET /api/ownership/teams/{teamId}`
+- `POST /api/ownership/teams/{teamId}/subscriptions`
+- `PUT /api/ownership/teams/{teamId}/subscriptions/{subscriptionId}`
+- `DELETE /api/ownership/teams/{teamId}/subscriptions/{subscriptionId}`
+
+Persistência: Blob, container `CONFIG_CONTAINER_NAME`, blob `config/ownership.json`. Sincronização automática por Management Group está documentada em [docs/OWNERSHIP_MANAGEMENT_GROUP_SYNC.md](docs/OWNERSHIP_MANAGEMENT_GROUP_SYNC.md).
+
+### Anomalias de custo e override de billing period
+
+- `GET /api/cost-anomalies`
+- `POST /api/cost-anomalies/run` (somente `FinOps.Admin`)
+- `GET /api/billing/periods/overrides` (somente `FinOps.Admin`)
+- `PUT /api/billing/periods/overrides/{subscriptionId}` — body `{ "billingCycleStartDay": 1..28 }` (somente `FinOps.Admin`)
+- `DELETE /api/billing/periods/overrides/{subscriptionId}` (somente `FinOps.Admin`)
+
+Persistência do override: Blob, container `CONFIG_CONTAINER_NAME`, blob `config/billing-period-overrides.json`.
+
+### Pipeline de timers em produção (horários UTC)
+
+> Todos os timers rodam após 9h UTC (6h BRT), quando a automação de start/stop garante que os recursos estão ativos.
+
+| Horário UTC | Horário BRT | Timer | Descrição |
+|-------------|-------------|-------|-----------|
+| 09:10 | 06:10 | `CostByServiceDailyTimer` | Coleta custo por serviço |
+| 09:20 | 06:20 | `CostByResourceDailyTimer` | Coleta custo por recurso |
+| 09:30 | 06:30 | `CostAnalysisTimer` | Análise completa (analyzers de subutilização) |
+| 11:00 | 08:00 | `CostAnomalyDailyTimer` | Detecção de anomalias |
+| 11:30 | 08:30 | `DailySummary` | Resumo diário |
+| 11:45 | 08:45 | `DatabaseCostRollupTimer` | Consolida o custo diário de SQL/Cosmos para o portal |
+| 12:00 | 09:00 | `PreGeneratedReportTimer` | Pré-gera relatórios HTML (com anomalias) |
+
+### Bootstrap dos Cost Management Exports
+
+Um administrador com `Cost Management Contributor` nas subscriptions e permissão para atribuir roles no Storage central executa:
+
+```powershell
+.\scripts\Initialize-CostExports.ps1 `
+  -StorageSubscriptionId "<finops-subscription-id>" `
+  -StorageResourceGroup "<finops-resource-group>" `
+  -StorageAccountName "<finops-storage-account>" `
+  -SubscriptionIds "<subscription-id-1>","<subscription-id-2>" `
+  -WhatIf
+```
+
+Remova `-WhatIf` para criar os exports inicialmente inativos; depois de validar, reexecute com `-Activate -Force`. Para todas as subscriptions, use `-AllSubscriptions -ManagementGroupId "<management-group-id>"` explicitamente. Exports existentes só são alterados com `-Force`. O importador (`EnableCostExportImport`) permanece desabilitado por padrão até ser aprovado no pipeline. Detalhes da migração em [docs/COST_EXPORT_MIGRATION.md](docs/COST_EXPORT_MIGRATION.md).
+
+## Testes
+
+```powershell
+# Backend
+dotnet build src\Personal.FinOpsApi.AzureFunctions\Personal.FinOpsApi.AzureFunctions.csproj
+dotnet test tests\Unit\Personal.FinOpsApi.AzureFunctions.UnitTests.csproj
+
+# Scripts (Pester)
+Invoke-Pester tests\PowerShell
+
+# Frontend
+Set-Location frontend\finops-portal; npm run lint; npm run build
+```
+
+Para um teste focado no backend: `dotnet test ... --filter "FullyQualifiedName~NomeDoTeste"`.
+
+Guia rápido de testes manuais contra Azure real em [docs/AZURE_TESTING.md](docs/AZURE_TESTING.md) e [docs/TESTING_REPORTS.md](docs/TESTING_REPORTS.md).
+
+## CI/CD e deploy
+
+Pipelines Azure DevOps em `pipelines/`:
+
+| Pipeline | Gatilho | O que faz |
+|---|---|---|
+| `build-function.yml` | push em `src/**` | Restore/build/publish do backend, publica artefato |
+| `deploy-function.yml` | artefato do build acima | Deploy da Function App (`functionAppLinux`) |
+| `build-frontend.yml` | push em `frontend/**` | `npm ci` + `npm run build`, publica `dist/` |
+| `deploy-frontend.yml` | artefato do build acima | Upload para Storage Static Website (`$web`) + purge do Azure Front Door |
+| `infra.yml` / `infra-frontend.yml` | mudanças em `pipelines/terraform-*/**` | Terraform da infraestrutura (backend/frontend) |
+
+Infraestrutura como código em `pipelines/terraform-function/` e `pipelines/terraform-frontend/`. **Não** execute Terraform contra o state de produção localmente — use sempre o pipeline. URL de produção do portal: `https://finops.example.com`.
+
+### Ambientes e nomes dos recursos
+
+A branch define o ambiente (`main` → prod; `homolog` e demais → hml). Detalhes em [AMBIENTE_HML.md](docs/AMBIENTE_HML.md).
+
+| Ambiente | Recursos Azure | Front Door (`frontdoor2-dev-afd`) | Portal |
+|---|---|---|---|
+| prod | `finopsplatform-nap-*` (nome legado: **`nap` = prod**) | endpoint `finopsplatform-dev-fde` (nome legado: **`dev` = prod**) | `https://finops.example.com` |
+| hml | `finopsplatform-hml-*` | endpoint `finopsplatform-hml-fde` | `https://finops-hml.example.com` |
+
+Os nomes de prod vêm de quando havia um ambiente só e não foram trocados: recursos Azure não podem ser renomeados, só recriados. Todos os recursos têm a tag `Ambiente` (`prod` ou `hml`), que é a referência confiável no portal do Azure.
+
+## Documentação adicional
+
+Aprofundamentos por feature/migração ficam em `docs/`:
+
+- [Roadmap do produto e migração assistida entre subscriptions (DEV/HML)](docs/ROADMAP.md)
+
+- [PROJECT_STUDY_GUIDE.md](docs/PROJECT_STUDY_GUIDE.md) — guia de estudo geral do projeto
+- [FRONTEND_PORTAL.md](docs/FRONTEND_PORTAL.md) — arquitetura detalhada do portal
+- [COST_EXPORT_MIGRATION.md](docs/COST_EXPORT_MIGRATION.md) — migração para Cost Management Exports
+- [Hybrid-Blob-Cosmos-Migration.md](docs/Hybrid-Blob-Cosmos-Migration.md) — modelo híbrido de storage
+- [FINANCIAL_DATA_RELIABILITY.md](docs/FINANCIAL_DATA_RELIABILITY.md) — confiabilidade dos dados financeiros
+- [OWNERSHIP_MANAGEMENT_GROUP_SYNC.md](docs/OWNERSHIP_MANAGEMENT_GROUP_SYNC.md) — sincronização de ownership por Management Group
+- [ORGANIZATIONAL_HIERARCHY_AND_PDF.md](docs/ORGANIZATIONAL_HIERARCHY_AND_PDF.md) — hierarquia organizacional e geração de PDF
+- [LogAnalytics-Integration.md](docs/LogAnalytics-Integration.md) e [LOG_ANALYTICS_CONFIG.md](docs/LOG_ANALYTICS_CONFIG.md) — integração e configuração do Log Analytics
+- [AZURE_TESTING.md](docs/AZURE_TESTING.md) / [TESTING_REPORTS.md](docs/TESTING_REPORTS.md) — testes manuais contra Azure
+
+Regras e convenções para contribuição estão em [AGENTS.md](AGENTS.md).

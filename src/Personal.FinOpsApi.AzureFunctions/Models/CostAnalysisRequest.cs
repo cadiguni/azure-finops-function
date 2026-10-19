@@ -73,4 +73,9 @@ public class AnalysisIncludeOptions
     /// Analisar SQL Databases subutilizados
     /// </summary>
     public bool SqlDatabases { get; set; } = false;
+
+    /// <summary>
+    /// Analisar Cosmos DB subutilizados
+    /// </summary>
+    public bool CosmosDatabases { get; set; } = false;
 }

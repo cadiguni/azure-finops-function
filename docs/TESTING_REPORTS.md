@@ -38,7 +38,7 @@ azurite --silent --location c:\temp\azurite --debug c:\temp\azurite\debug.log
 
 ### 2. Iniciar Azure Function
 ```bash
-cd "c:\Projetos\Personal\azure-finops-platform\src\Personal.FinOpsApi.AzureFunctions"
+cd "<caminho-do-repo>\src\Personal.FinOpsApi.AzureFunctions"
 func start --script-root . --verbose
 ```
 
@@ -49,8 +49,8 @@ Version: 4.x
 Functions:
     GenerateHtmlReport: [GET] http://localhost:7071/api/report/html
     GenerateCsvReport: [GET] http://localhost:7071/api/report/csv
-    TeamOwnershipDiscover: [POST] http://localhost:7071/api/ownership/discover  
-    GetTeamOwnership: [GET] http://localhost:7071/api/ownership
+    OwnershipSyncFromManagementGroups: [POST] http://localhost:7071/api/ownership/sync-management-groups
+    OwnershipListTeams: [GET] http://localhost:7071/api/ownership/teams
     GetReportTeams: [GET] http://localhost:7071/api/report/teams
     GenerateCsvReport: [GET] http://localhost:7071/api/report/csv
     HealthCheck: [GET] http://localhost:7071/api/health
@@ -118,14 +118,9 @@ NAP,sub-123,rg-test,/subscriptions/.../vm1,vm-idle,Virtual Machine,IdleVm,"VM wi
 
 Para testar com dados reais, você precisa:
 
-#### A. **Gerar dados primeiro** (execute análise manual)
-```bash
-# Executar análise de custo para gerar dados
-curl -X POST http://localhost:7071/api/ManualCostAnalysis
+#### A. **Gerar dados primeiro**
 
-# Ou forçar coleta de dados
-curl -X POST http://localhost:7071/api/collect-costs
-```
+Aguarde ou execute localmente os timers `CostExportImportTimer` e `CostAnalysisTimer`. As APIs manuais legadas de coleta e análise foram removidas.
 
 #### B. **Verificar se dados estão no Storage**
 ```bash
@@ -147,7 +142,7 @@ http://localhost:7071/api/report/html?date=2024-04-22
 
 ### ❌ Problema: "No data found"
 **Solução:**
-1. Verificar se análise foi executada: `curl http://localhost:7071/api/ManualCostAnalysis`
+1. Verificar nos logs se `CostExportImportTimer` e `CostAnalysisTimer` foram executados
 2. Confirmar data correta: usar data de quando análise rodou
 3. Verificar Storage: dados devem estar em `finops-analysis` container
 
@@ -159,12 +154,12 @@ az login
 az account set --subscription "sua-subscription-id"
 ```
 
-### ❌ Problema: "Status 401 Unauthorized"  
-**✅ RESOLVIDO:** Endpoints agora usam `AuthorizationLevel.Anonymous`
+### ❌ Problema: "Status 401 Unauthorized"
+
+As APIs do portal exigem token Bearer com role `FinOps.Reader` ou `FinOps.Admin`.
 ```bash
-# Agora funcionam sem autenticação
-curl -X POST "http://localhost:7071/api/ownership/discover"
-curl "http://localhost:7071/api/ownership"
+curl "http://localhost:7071/api/ownership/teams" \
+     -H "Authorization: Bearer <TOKEN>"
 ```
 
 ## 🎯 NOVOS ENDPOINTS - Team Ownership (2024)
@@ -172,7 +167,8 @@ curl "http://localhost:7071/api/ownership"
 ### 🔍 1. Discovery de Teams
 ```bash
 # Descobrir teams automaticamente via Management Groups
-curl -X POST "http://localhost:7071/api/ownership/discover" \
+curl -X POST "http://localhost:7071/api/ownership/sync-management-groups" \
+     -H "Authorization: Bearer <TOKEN>" \
      -H "Content-Type: application/json"
 ```
 
@@ -197,7 +193,8 @@ curl -X POST "http://localhost:7071/api/ownership/discover" \
 ### 📋 2. Visualizar Ownership Atual  
 ```bash
 # Ver configuração completa de teams
-curl "http://localhost:7071/api/ownership"
+curl "http://localhost:7071/api/ownership/teams" \
+     -H "Authorization: Bearer <TOKEN>"
 ```
 
 ### 📊 3. Relatórios por Teams
@@ -232,10 +229,12 @@ curl "http://localhost:7071/api/report/pdf?date=2024-04-29&team=plataforma" \
 
 ```bash
 # 1. Descobrir teams primeiro
-curl -X POST "http://localhost:7071/api/ownership/discover"
+curl -X POST "http://localhost:7071/api/ownership/sync-management-groups" \
+     -H "Authorization: Bearer <TOKEN>"
 
 # 2. Verificar teams criados  
-curl "http://localhost:7071/api/ownership"
+curl "http://localhost:7071/api/ownership/teams" \
+     -H "Authorization: Bearer <TOKEN>"
 
 # 3. Ver relatório por teams
 curl "http://localhost:7071/api/report/teams"

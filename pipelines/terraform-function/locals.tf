@@ -1,79 +1,39 @@
 locals {
-  dominio = "personal.com"
+  dominio = "example.com"
+  # Os recursos ignoram mudanças de tags (automações de shutdown e o App Insights gravam tags próprias):
+  # tags novas só valem para recursos criados depois; nos existentes, aplicar com az tag update --operation Merge.
   tags = {
-    Responsável = "personal@personal.com"
-    Setor = "Personal"
+    Responsável = "seu-email@example.com"
+    Setor       = "NAP"
+    # Prod usa nomes legados "nap": a tag deixa o ambiente explícito no portal do Azure.
+    Ambiente = var.ambiente
   }
 
-  localizacao = "East US 2"
-  aplicacao   = var.aplicacao
-  setor       = var.setor
+  # Região dos recursos; o RG fica sempre em East US 2 (só metadado) porque trocá-lo destruiria
+  # o RG inteiro, incluindo o storage do portal gerenciado pelo terraform-frontend.
+  localizacao    = coalesce(var.location, "East US 2")
+  localizacao_rg = "East US 2"
+  # Cosmos pode precisar de outra região quando a principal não tem capacidade para a subscription.
+  localizacao_cosmos = coalesce(var.cosmos_location, local.localizacao)
+  aplicacao      = var.aplicacao
+  setor          = var.setor
+  ambiente       = var.ambiente
+  is_prod        = var.ambiente == "prod"
 
-  # Configurações específicas do FinOps
+  # Prod mantém a nomenclatura legada <aplicacao>-<setor>-* para não recriar recursos existentes.
+  # Demais ambientes usam <aplicacao>-<ambiente>-*, o mesmo padrão do template de deploy (<NomeAplicacao>-<Ambiente>-func).
+  nome_base         = local.is_prod ? "${local.aplicacao}-${local.setor}" : "${local.aplicacao}-${local.ambiente}"
+  nome_base_storage = lower(replace(local.nome_base, "-", ""))
+
+  # Configurações específicas do FinOps - Nomenclatura dos recursos
   finops_settings = {
-    function_app_name = "${local.aplicacao}-${local.setor}-func"
-    app_service_plan_name = "${local.aplicacao}-${local.setor}-plan"
-    application_insights_name = "${local.aplicacao}-${local.setor}-ai"
-    managed_identity_name = "${local.aplicacao}-${local.setor}-identity"
-    
-    # Configurações da Function
-    function_settings = {
-      # Runtime Configuration
-      "FUNCTIONS_WORKER_RUNTIME"           = "dotnet-isolated"
-      "FUNCTIONS_EXTENSION_VERSION"        = "~4"
-      "WEBSITE_USE_PLACEHOLDER_DOTNETISOLATED" = "1"
-      
-      # ⚠️ AJUSTE CRÍTICO: Azure Functions usa NCRONTAB (6 campos)
-      # Analysis Schedules - NCRONTAB format (seconds, minutes, hours, day, month, day-of-week)
-      "FinOps__Schedules__CostAnalysis" = "0 */5 * * * *"     # A cada 5 minutos para teste
-      "FinOps__Schedules__DailySummary" = "0 0 6 * * *"       # Diário às 06:00 UTC
-      
-      # 🚀 CONTROLES DE PARALELISMO GLOBAL (Economia de custo)
-      "FinOps__Execution__MaxParallelSubscriptions" = "3"
-      "FinOps__Execution__MaxParallelAnalyzers" = "5"
-      "FinOps__Execution__MaxSubscriptionProcessingTime" = "00:20:00"
-      
-      # 💰 CONTROLE DE MÉTRICAS (Super importante para custo)
-      "FinOps__Analyzer__EnableMetricsDeepAnalysis" = "true"
-      
-      # 🎯 CONFIGURAÇÕES BÁSICAS DE ANÁLISE
-      "FinOps__Analyzer__EnableVmAnalysis" = "true"
-      "FinOps__Analyzer__EnableDiskAnalysis" = "true"
-      "FinOps__Analyzer__EnableAppServiceAnalysis" = "true"
-      "FinOps__Analyzer__EnableSqlAnalysis" = "true"
-      
-      # 🔍 THRESHOLDS DINÂMICOS POR AMBIENTE
-      "FinOps__Thresholds__ProductionCpu" = "15"              # Produção usa threshold maior
-      "FinOps__Thresholds__DevCpu" = "5"                      # Dev usa threshold menor
-      "FinOps__Analyzer__LowCpuThreshold" = "5.0"             # Padrão (será sobrescrito por ambiente)
-      "FinOps__Analyzer__DaysInactiveThreshold" = "7"
-      "FinOps__Analyzer__MinimumMonthlySavingsToRecommend" = "30"  # Dinâmico
-      
-      # 💎 MELHORIAS ENTERPRISE
-      # Caching de métricas (evita reprocessamento)
-      "FinOps__Caching__MetricsCacheHours" = "24"
-      
-      # Governança - Tags obrigatórias
-      "FinOps__Governance__RequiredTags" = jsonencode(["Responsavel", "Setor", "Ambiente"])
-      
-      # Classificação de ambiente com fallback
-      "FinOps__EnvironmentClassification__UseTagsFallback" = "true"
-      
-      # Management Groups
-      "FinOps__EnvironmentClassification__ProductionManagementGroups" = jsonencode(["Setores"])
-      "FinOps__EnvironmentClassification__NonProductionManagementGroups" = jsonencode(["Visual Studio"])
-      "FinOps__Scope__RootManagementGroup" = var.root_management_group
-      "FinOps__Behavior__DryRunInProduction" = "true"
-      "FinOps__Behavior__AllowAutomationInProduction" = "false"
-      
-      # Queue Configuration
-      "FinOps__Queue__MaxProcessingTime" = "00:30:00"
-      "FinOps__Queue__MaxRetryAttempts" = "3"
-      "FinOps__Queue__BatchSize" = "10"
-      
-      # Output Configuration
-      "FinOps__Storage__ResultsContainerName" = "finops-analysis"
-      "FinOps__Storage__ArchiveAfterDays" = "90"
-    }
+    function_app_name         = "${local.nome_base}-func"
+    app_service_plan_name     = "${local.nome_base}-plan"
+    application_insights_name = "${local.nome_base}-ai"
+    managed_identity_name     = "${local.nome_base}-identity"
+    cosmos_account_name       = var.cosmos_account_name != "" ? var.cosmos_account_name : lower("${local.nome_base}-cosmos")
   }
+  
+  # NOTA: As configurações de app_settings estão definidas diretamente em azurerm_function_app.tf
+  # para maior clareza e controle do que é realmente aplicado.
 }

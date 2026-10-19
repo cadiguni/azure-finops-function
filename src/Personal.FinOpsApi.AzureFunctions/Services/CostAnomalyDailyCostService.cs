@@ -4,64 +4,54 @@ using Microsoft.Extensions.Logging;
 namespace Personal.FinOpsApi.AzureFunctions.Services;
 
 /// <summary>
-/// Consulta custos diários das subscriptions via Cost Management API.
+/// Consulta custos diários das subscriptions pela fonte de custo configurada.
 /// Retorna custo total por dia para cada subscription no período solicitado.
 /// </summary>
 public class CostAnomalyDailyCostService
 {
-    private readonly ICostManagementClient _costManagementClient;
+    private readonly ICostDataReader _costDataReader;
     private readonly ILogger<CostAnomalyDailyCostService> _logger;
 
     public CostAnomalyDailyCostService(
-        ICostManagementClient costManagementClient,
+        ICostDataReader costDataReader,
         ILogger<CostAnomalyDailyCostService> logger)
     {
-        _costManagementClient = costManagementClient;
+        _costDataReader = costDataReader;
         _logger = logger;
     }
 
     /// <summary>
-    /// Busca custo diário total de uma subscription nos últimos N dias + hoje
+    /// Busca custo diário total de uma subscription em uma janela de dias.
     /// </summary>
     public async Task<List<DailyCostEntry>> GetDailyCostsAsync(
-        string subscriptionId, 
-        int baselineDays, 
+        string subscriptionId,
+        DateTime requestedDate,
+        int lookbackDays,
         CancellationToken cancellationToken = default)
     {
-        // Período: de (hoje - baselineDays) até hoje
-        var today = DateTime.UtcNow.Date;
-        var startDate = today.AddDays(-baselineDays);
+        var endDate = requestedDate.Date;
+        var startDate = endDate.AddDays(-(Math.Max(lookbackDays, 1) - 1));
 
         _logger.LogInformation(
             "[COST-ANOMALY] Consultando custos diários para {subscriptionId}: {start} a {end}",
-            subscriptionId, startDate.ToString("yyyy-MM-dd"), today.ToString("yyyy-MM-dd"));
+            subscriptionId, startDate.ToString("yyyy-MM-dd"), endDate.ToString("yyyy-MM-dd"));
 
         try
         {
-            // Usa granularidade Daily para ter custo por dia (sem agrupamento por serviço)
-            var response = await _costManagementClient.QueryCostByServiceAsync(
+            var result = await _costDataReader.ReadDailyCostsAsync(
                 subscriptionId,
                 startDate,
-                today,
-                granularity: "Daily",
-                cancellationToken: cancellationToken);
-
-            // Agrupa por data (soma de todos os serviços no dia)
-            var dailyCosts = response.Rows
-                .Where(r => r.UsageDate.HasValue)
-                .GroupBy(r => r.UsageDate!.Value.Date)
-                .Select(g => new DailyCostEntry
-                {
-                    Date = g.Key.ToString("yyyy-MM-dd"),
-                    TotalCost = g.Sum(r => r.TotalCost),
-                    Currency = g.FirstOrDefault()?.Currency ?? "BRL"
-                })
-                .OrderBy(d => d.Date)
-                .ToList();
+                endDate,
+                cancellationToken);
+            var dailyCosts = result.Entries.ToList();
 
             _logger.LogInformation(
-                "[COST-ANOMALY] {count} dias de custo obtidos para {subscriptionId}. Total hoje: {todayCost:F2}",
-                dailyCosts.Count, subscriptionId,
+                "[COST-ANOMALY] {count} dias de custo obtidos para {subscriptionId}. source={source} dataAsOf={dataAsOf} fallback={fallback} Último custo coletado: {latestCost:F2}",
+                dailyCosts.Count,
+                subscriptionId,
+                result.Source,
+                result.DataAsOf?.ToString("yyyy-MM-dd"),
+                result.UsedFallback,
                 dailyCosts.LastOrDefault()?.TotalCost ?? 0);
 
             return dailyCosts;
@@ -69,7 +59,7 @@ public class CostAnomalyDailyCostService
         catch (Exception ex)
         {
             _logger.LogError(ex, "[COST-ANOMALY] Erro ao consultar custos diários para {subscriptionId}", subscriptionId);
-            return new List<DailyCostEntry>();
+            throw;
         }
     }
 }

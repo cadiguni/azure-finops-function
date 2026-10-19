@@ -20,7 +20,7 @@ namespace Personal.FinOpsApi.AzureFunctions.Functions;
 /// - retry com exponential backoff + Retry-After
 /// - timeout estendido (até 60 min)
 /// 
-///  SUBSCRIPTION ALVO: 504a622c-3995-46c5-8ba7-8edb365ed17b
+///  SUBSCRIPTION ALVO: 00000000-0000-0000-0000-00000000a004
 /// </summary>
 public class SubscriptionAnalysisProductionQueueFunction
 {
@@ -96,7 +96,7 @@ public class SubscriptionAnalysisProductionQueueFunction
             }
 
             //  VALIDAÇÃO: Confirmar que é realmente subscription de produção
-            var expectedProductionId = "504a622c-3995-46c5-8ba7-8edb365ed17b";
+            var expectedProductionId = "00000000-0000-0000-0000-00000000a004";
             if (!analysisRequest.SubscriptionId.Equals(expectedProductionId, StringComparison.OrdinalIgnoreCase))
             {
                 _logger.LogWarning(" [PRODUCTION QUEUE] Subscription {id} não é produção esperada ({expected})", 

@@ -124,9 +124,9 @@ public class IdleVmAnalyzer
                     
                     // 💰 CUSTO REAL: Buscar do Cost Management primeiro, fallback para tabela
                     var costData = await _costLookupService.GetResourceCostDataAsync(subscriptionId, resourceId);
-                    var dailyCost = costData.DailyCost > 0 ? costData.DailyCost : EstimateVmMonthlyCostFallback(vmSize) / 30;
-                    var estimatedMonthlyCost = costData.MonthlyCost > 0 ? costData.MonthlyCost : EstimateVmMonthlyCostFallback(vmSize);
-                    var costSource = costData.MonthlyCost > 0 ? "cost-management" : "sku-fallback";
+                    var dailyCost = costData.DailyCost;
+                    var estimatedMonthlyCost = costData.MonthlyCost;
+                    var costSource = costData.CostSource;
                     
                     var monthlySavings = estimatedMonthlyCost * 0.85m; // 85% economia ao desligar
 
@@ -141,8 +141,10 @@ public class IdleVmAnalyzer
                         SubscriptionId = subscriptionId,
                         DailyCost = dailyCost,
                         EstimatedMonthlyCost = estimatedMonthlyCost,
+                        CostProvenance = costData.Provenance,
+                        ObservedCost = costData.ObservedCost,
                         EstimatedMonthlySavings = monthlySavings,
-                        Currency = "BRL",
+                        Currency = string.IsNullOrWhiteSpace(costData.Currency) ? "BRL" : costData.Currency,
                         Priority = estimatedMonthlyCost > 900 ? FindingPriorities.HIGH : 
                                   estimatedMonthlyCost > 300 ? FindingPriorities.MEDIUM : FindingPriorities.LOW,
                         Confidence = 0.8,
@@ -162,6 +164,11 @@ public class IdleVmAnalyzer
                             ["availableMemoryGB"] = memoryAvailable ? Math.Round(availableMemoryGB, 2) : -1,
                             ["metricsSource"] = "AzureMonitor",
                             ["costSource"] = costSource,
+                            ["costMatchConfidence"] = costData.CostMatchConfidence,
+                            ["costMatchedResourceId"] = costData.CostMatchedResourceId ?? resourceId,
+                            ["costPeriodFrom"] = costData.CostPeriodFrom ?? DateTime.UtcNow.Date.AddDays(-30),
+                            ["costPeriodTo"] = costData.CostPeriodTo ?? DateTime.UtcNow.Date,
+                            ["costNote"] = costData.CostNote ?? string.Empty,
                             ["realCostFromApi"] = costData.MonthlyCost
                         }
                     };
@@ -205,24 +212,7 @@ public class IdleVmAnalyzer
         return result;
     }
 
-    private decimal EstimateVmMonthlyCostFallback(string vmSize)
-    {
-        // Preços aproximados por mês em BRL - FALLBACK quando Cost Management não retorna dados
-        return vmSize.ToLower() switch
-        {
-            "standard_b1s" => 45.00m,
-            "standard_b1ms" => 90.00m,
-            "standard_b2s" => 180.00m,
-            "standard_d2s_v3" => 350.00m,
-            "standard_d4s_v3" => 700.00m,
-            "standard_d8s_v3" => 1400.00m,
-            "standard_e2s_v3" => 400.00m,
-            "standard_e4s_v3" => 800.00m,
-            "standard_f2s_v2" => 250.00m,
-            "standard_f4s_v2" => 500.00m,
-            _ => 200.00m // Default
-        };
-    }
+
 
     private Dictionary<string, string> ExtractTags(JsonElement resource)
     {

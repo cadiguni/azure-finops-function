@@ -4,7 +4,7 @@ namespace Personal.FinOpsApi.AzureFunctions.Models;
 
 /// <summary>
 ///  LOG ANALYTICS: Entrada individual de recomendação FinOps para dashboards
-///  Otimizado para consultas KQL e dashboards (Azure Workbook/Grafana)
+///  Otimizado para consultas KQL e dashboards em Azure Workbooks.
 /// 
 /// Exemplos de KQL que isso permite:
 /// - FinOpsRecommendations_CL | summarize sum(EstimatedMonthlySavings_d) by RecommendationType_s

@@ -12,6 +12,9 @@ namespace Personal.FinOpsApi.AzureFunctions.Services;
 public class CostManagementClient : ICostManagementClient
 {
     private const string CostManagementScope = "https://management.azure.com/.default";
+    private const int MaxRetryAttempts = 8;
+    private static readonly SemaphoreSlim CostQueryThrottle = new(1, 1);
+    private static readonly TimeSpan MinimumRequestInterval = TimeSpan.FromMilliseconds(500);
     private readonly TokenCredential _credential;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<CostManagementClient> _logger;
@@ -43,6 +46,20 @@ public class CostManagementClient : ICostManagementClient
         return ParseServiceResponse(subscriptionId, responseContent);
     }
 
+    public async Task<CostByServiceQueryResponse> QueryCostByServiceForBillingMonthToDateAsync(
+        string subscriptionId,
+        string granularity,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedGranularity = NormalizeGranularity(granularity);
+        var responseContent = await ExecuteQueryAsync(
+            subscriptionId,
+            BuildBillingMonthToDateQueryBody(normalizedGranularity, new[] { "ServiceName" }),
+            cancellationToken);
+
+        return ParseServiceResponse(subscriptionId, responseContent);
+    }
+
     public async Task<CostByResourceQueryResponse> QueryCostByResourceAsync(
         string subscriptionId,
         DateTime dateStartUtc,
@@ -58,6 +75,92 @@ public class CostManagementClient : ICostManagementClient
             cancellationToken);
 
         return ParseResourceResponse(subscriptionId, responseContent, serviceFilter);
+    }
+
+    public async Task<IReadOnlyCollection<CostDimensionInfo>> GetAvailableDimensionsAsync(
+        string subscriptionId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(subscriptionId))
+        {
+            throw new ArgumentException("SubscriptionId é obrigatório", nameof(subscriptionId));
+        }
+
+        var token = await _credential.GetTokenAsync(
+            new TokenRequestContext(new[] { CostManagementScope }),
+            cancellationToken);
+
+        var endpoint =
+            $"https://management.azure.com/subscriptions/{subscriptionId}/providers/Microsoft.CostManagement/dimensions?api-version=2023-03-01";
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
+
+        using var httpClient = _httpClientFactory.CreateClient();
+        using var response = await httpClient.SendAsync(request, cancellationToken);
+        var content = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogWarning(
+                "Cost dimensions query falhou para {subscriptionId} (status {status})",
+                subscriptionId,
+                (int)response.StatusCode);
+            return Array.Empty<CostDimensionInfo>();
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(content);
+            if (!doc.RootElement.TryGetProperty("value", out var valueElement) || valueElement.ValueKind != JsonValueKind.Array)
+            {
+                return Array.Empty<CostDimensionInfo>();
+            }
+
+            return valueElement
+                .EnumerateArray()
+                .Select(item =>
+                {
+                    if (item.TryGetProperty("name", out var nameElement) &&
+                        nameElement.TryGetProperty("value", out var nameValue))
+                    {
+                        return new CostDimensionInfo { Name = nameValue.GetString() ?? string.Empty };
+                    }
+
+                    if (item.TryGetProperty("properties", out var propertiesElement) &&
+                        propertiesElement.TryGetProperty("displayName", out var displayName))
+                    {
+                        return new CostDimensionInfo { Name = displayName.GetString() ?? string.Empty };
+                    }
+
+                    return new CostDimensionInfo { Name = string.Empty };
+                })
+                .Where(d => !string.IsNullOrWhiteSpace(d.Name))
+                .GroupBy(d => d.Name, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.First())
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Falha ao parsear dimensões do Cost Management para {subscriptionId}", subscriptionId);
+            return Array.Empty<CostDimensionInfo>();
+        }
+    }
+
+    public async Task<IReadOnlyCollection<CostDiagnosticRow>> QueryCostDiagnosticsAsync(
+        string subscriptionId,
+        DateTime dateStartUtc,
+        DateTime dateEndUtc,
+        string granularity,
+        IReadOnlyCollection<string> groupingDimensions,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedGranularity = NormalizeGranularity(granularity);
+        var responseContent = await ExecuteQueryAsync(
+            subscriptionId,
+            BuildQueryBody(dateStartUtc, dateEndUtc, normalizedGranularity, null, groupingDimensions),
+            cancellationToken);
+
+        return ParseDiagnosticResponse(responseContent);
     }
 
     private async Task<string> ExecuteQueryAsync(
@@ -77,42 +180,63 @@ public class CostManagementClient : ICostManagementClient
 
         var requestJson = JsonSerializer.Serialize(requestBody);
 
-        for (var attempt = 1; attempt <= 5; attempt++)
+        for (var attempt = 1; attempt <= MaxRetryAttempts; attempt++)
         {
-            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+            HttpStatusCode statusCode;
+            string responseContent;
+            TimeSpan retryDelay;
+
+            await CostQueryThrottle.WaitAsync(cancellationToken);
+            try
             {
-                Content = new StringContent(requestJson, Encoding.UTF8, "application/json")
-            };
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
+                using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+                {
+                    Content = new StringContent(requestJson, Encoding.UTF8, "application/json")
+                };
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
 
-            using var httpClient = _httpClientFactory.CreateClient();
-            using var response = await httpClient.SendAsync(request, cancellationToken);
-            var responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
+                using var httpClient = _httpClientFactory.CreateClient();
+                using var response = await httpClient.SendAsync(request, cancellationToken);
+                responseContent = await response.Content.ReadAsStringAsync(cancellationToken);
+                statusCode = response.StatusCode;
+                retryDelay = GetRetryDelay(response, attempt);
+            }
+            finally
+            {
+                try
+                {
+                    await Task.Delay(MinimumRequestInterval, cancellationToken);
+                }
+                finally
+                {
+                    CostQueryThrottle.Release();
+                }
+            }
 
-            if (response.IsSuccessStatusCode)
+            if ((int)statusCode is >= 200 and <= 299)
             {
                 return responseContent;
             }
 
-            if (!IsTransient(response.StatusCode) || attempt == 5)
+            if (!IsTransient(statusCode) || attempt == MaxRetryAttempts)
             {
                 _logger.LogError(
                     "Cost query falhou para {subscriptionId} (status {status}): {content}",
                     subscriptionId,
-                    (int)response.StatusCode,
+                    (int)statusCode,
                     responseContent);
                 throw new HttpRequestException(
-                    $"Cost query failed ({(int)response.StatusCode}) for {subscriptionId}: {responseContent}");
+                    $"Cost query failed ({(int)statusCode}) for {subscriptionId}: {responseContent}");
             }
 
-            var delay = GetRetryDelay(response, attempt);
             _logger.LogWarning(
-                "Cost query transitório para {subscriptionId} (status {status}) tentativa {attempt}/5. Retry em {delay}ms",
+                "Cost query transitório para {subscriptionId} (status {status}) tentativa {attempt}/{maxAttempts}. Retry em {delay}ms",
                 subscriptionId,
-                (int)response.StatusCode,
+                (int)statusCode,
                 attempt,
-                delay.TotalMilliseconds);
-            await Task.Delay(delay, cancellationToken);
+                MaxRetryAttempts,
+                retryDelay.TotalMilliseconds);
+            await Task.Delay(retryDelay, cancellationToken);
         }
 
         throw new InvalidOperationException("Fluxo de retry inesperado na consulta de custo.");
@@ -172,6 +296,38 @@ public class CostManagementClient : ICostManagementClient
                 },
                 grouping,
                 filter
+            }
+        };
+    }
+
+    private static object BuildBillingMonthToDateQueryBody(
+        string granularity,
+        IReadOnlyCollection<string> groupingDimensions)
+    {
+        var grouping = groupingDimensions
+            .Select(name => new
+            {
+                type = "Dimension",
+                name
+            })
+            .ToArray();
+
+        return new
+        {
+            type = "Usage",
+            timeframe = "BillingMonthToDate",
+            dataset = new
+            {
+                granularity,
+                aggregation = new
+                {
+                    totalCost = new
+                    {
+                        name = "PreTaxCost",
+                        function = "Sum"
+                    }
+                },
+                grouping
             }
         };
     }
@@ -297,6 +453,40 @@ public class CostManagementClient : ICostManagementClient
         return true;
     }
 
+    private static IReadOnlyCollection<CostDiagnosticRow> ParseDiagnosticResponse(string responseContent)
+    {
+        if (!TryGetQueryRows(responseContent, out var columns, out var rows))
+        {
+            return Array.Empty<CostDiagnosticRow>();
+        }
+
+        int resourceIdIndex = FindColumn(columns, "ResourceId", "InstanceId");
+        int resourceTypeIndex = FindColumn(columns, "ResourceType");
+        int resourceGroupIndex = FindColumn(columns, "ResourceGroupName", "ResourceGroup");
+        int serviceNameIndex = FindColumn(columns, "ServiceName", "Service");
+        int meterCategoryIndex = FindColumn(columns, "MeterCategory");
+        int meterSubCategoryIndex = FindColumn(columns, "MeterSubCategory");
+        int costIndex = FindColumn(columns, "PreTaxCost", "Cost");
+        int currencyIndex = FindColumn(columns, "Currency", "BillingCurrency", "CurrencyCode");
+        int dateIndex = FindColumn(columns, "UsageDate", "Date");
+
+        return rows
+            .Where(row => row.ValueKind == JsonValueKind.Array)
+            .Select(row => new CostDiagnosticRow
+            {
+                ResourceId = ReadString(row, resourceIdIndex) ?? string.Empty,
+                ResourceType = ReadString(row, resourceTypeIndex) ?? string.Empty,
+                ResourceGroupName = ReadString(row, resourceGroupIndex) ?? string.Empty,
+                ServiceName = ReadString(row, serviceNameIndex) ?? string.Empty,
+                MeterCategory = ReadString(row, meterCategoryIndex) ?? string.Empty,
+                MeterSubCategory = ReadString(row, meterSubCategoryIndex) ?? string.Empty,
+                TotalCost = ReadDecimal(row, costIndex),
+                Currency = ReadString(row, currencyIndex) ?? "BRL",
+                UsageDate = ReadDate(row, dateIndex)
+            })
+            .ToList();
+    }
+
     private static string NormalizeGranularity(string granularity)
     {
         return string.Equals(granularity, "Daily", StringComparison.OrdinalIgnoreCase)
@@ -384,16 +574,18 @@ public class CostManagementClient : ICostManagementClient
 
     private static TimeSpan GetRetryDelay(HttpResponseMessage response, int attempt)
     {
-        if (response.Headers.TryGetValues("Retry-After", out var values))
+        if (response.Headers.RetryAfter?.Delta is { } delta)
         {
-            var raw = values.FirstOrDefault();
-            if (int.TryParse(raw, out var retryAfterSeconds))
-            {
-                return TimeSpan.FromSeconds(Math.Max(1, retryAfterSeconds));
-            }
+            return TimeSpan.FromSeconds(Math.Clamp(delta.TotalSeconds, 1, 60));
         }
 
-        var baseDelayMs = Math.Pow(2, attempt) * 500;
+        if (response.Headers.RetryAfter?.Date is { } retryAt)
+        {
+            var delay = retryAt - DateTimeOffset.UtcNow;
+            return TimeSpan.FromSeconds(Math.Clamp(delay.TotalSeconds, 1, 60));
+        }
+
+        var baseDelayMs = Math.Min(Math.Pow(2, attempt) * 500, 30_000);
         return TimeSpan.FromMilliseconds(baseDelayMs + Random.Shared.Next(200, 900));
     }
 }

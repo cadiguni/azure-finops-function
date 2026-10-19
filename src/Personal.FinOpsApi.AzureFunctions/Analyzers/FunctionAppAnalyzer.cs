@@ -149,7 +149,7 @@ public class FunctionAppAnalyzer
                     var costData = await _costLookupService.GetResourceCostDataAsync(subscriptionId, resourceId);
                     var dailyCost = costData.DailyCost;
                     var estimatedMonthlyCost = costData.MonthlyCost;
-                    var costSource = costData.MonthlyCost > 0 ? "cost-management" : "no-cost-data";
+                    var costSource = costData.CostSource;
                     
                     // Para Functions Consumption sem execução, custo é praticamente zero
                     var monthlySavings = estimatedMonthlyCost * 0.9m; // 90% economia potencial
@@ -169,8 +169,10 @@ public class FunctionAppAnalyzer
                         SubscriptionId = subscriptionId,
                         DailyCost = dailyCost,
                         EstimatedMonthlyCost = estimatedMonthlyCost,
+                        CostProvenance = costData.Provenance,
+                        ObservedCost = costData.ObservedCost,
                         EstimatedMonthlySavings = monthlySavings,
-                        Currency = "BRL",
+                        Currency = string.IsNullOrWhiteSpace(costData.Currency) ? "BRL" : costData.Currency,
                         Priority = priority,
                         Confidence = totalExecutions == 0 ? 0.9 : 0.6, // Alta confiança se zero execuções
                         Description = $"Function App '{name}' possivelmente órfã há {analysisPeriodDays} dias: {string.Join(", ", reasonDetails)}",
@@ -185,6 +187,11 @@ public class FunctionAppAnalyzer
                             { "totalExecutionUnits", totalExecutionUnits },
                             { "analysisPeriodDays", analysisPeriodDays },
                             { "costSource", costSource },
+                            { "costMatchConfidence", costData.CostMatchConfidence },
+                            { "costMatchedResourceId", costData.CostMatchedResourceId ?? resourceId },
+                            { "costPeriodFrom", costData.CostPeriodFrom ?? DateTime.UtcNow.Date.AddDays(-30) },
+                            { "costPeriodTo", costData.CostPeriodTo ?? DateTime.UtcNow.Date },
+                            { "costNote", costData.CostNote ?? string.Empty },
                             { "hasRecentActivity", hasRecentActivity }
                         }
                     };

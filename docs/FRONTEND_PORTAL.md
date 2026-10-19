@@ -24,7 +24,7 @@ SPA (Single Page Application) em **React 19 + TypeScript + Vite** que consome as
 ```
 frontend/finops-portal/
 ├── .env                    # Config local (VITE_API_BASE_URL=http://localhost:7071)
-├── .env.example            # Config produção (VITE_API_BASE_URL=https://...azurewebsites.net)
+├── .env.production         # Produção usa VITE_API_BASE_URL vazio e /api via Front Door
 ├── index.html              # Entry point HTML
 ├── vite.config.ts          # Configuração do Vite
 ├── tsconfig.json           # Configuração TypeScript
@@ -41,10 +41,9 @@ frontend/finops-portal/
     │   └── useFetch.ts     # Hook genérico para chamadas API
     ├── pages/
     │   ├── Dashboard.tsx       # 6 cards com resumo geral
-    │   ├── Reports.tsx         # Visualizador de relatórios HTML/CSV
     │   ├── Recommendations.tsx # Tabela detalhada de recomendações
     │   ├── Anomalies.tsx       # Tabela de anomalias de custo
-    │   └── Ownership.tsx       # Visualização de times (read-only)
+    │   └── Ownership.tsx       # Visualização/administração de ownership por time
     ├── services/
     │   └── api.ts          # Cliente API centralizado
     └── types/
@@ -54,45 +53,87 @@ frontend/finops-portal/
 ## Páginas
 
 ### 1. Dashboard (`/`)
-- **6 cards**: Economia Potencial Mensal, Economia Potencial Anual, Total de Recomendações, Recursos para Revisar, Recursos para Excluir, Anomalias de Custo
-- **Tabelas**: Economia por Tipo de Recurso e por Subscription
-- **APIs**: `GET /api/recommendations`, `GET /api/cost-anomalies`
-- **Lógica**: `classifyAction()` classifica recursos como Excluir (discos/IPs) ou Revisar
 
-### 2. Relatórios (`/reports`)
-- **Filtros**: Data, Subscription, Time
-- **Ações**: Abrir HTML (nova aba), Download CSV, Copiar link
-- **Preview**: iframe com relatório HTML embutido
-- **APIs**: `GET /api/report/html`, `GET /api/report/csv`, `GET /api/teams`, `GET /api/recommendations`
-- **Nota**: Filtro de subscription e time são mutuamente exclusivos
+- **Cards**: custo acumulado nos ciclos das assinaturas, projeção dos ciclos, economias estimadas, recomendações, anomalias e projeção dos bancos analisados.
+- **Tabelas**: indicadores de bancos e resumo por time, incluindo `Sem atribuição`.
+- **APIs**: `GET /api/dashboard/summary`, `GET /api/dashboard/teams`, `GET /api/dashboard/databases`.
+- **Qualidade financeira**: `financialSummary` informa cobertura, fontes, datas de análise e revisão do relatório. Custos ausentes são `null`/`—`, não zero. Valores disponíveis permanecem provisórios.
+- **Período**: a soma dos ciclos de faturamento não representa necessariamente o mês-calendário. Os custos de bancos continuam sendo projeções associadas às recomendações, não o inventário completo.
+- **Compatibilidade**: summaries antigos sem metadados financeiros exibem aviso até serem regenerados. O fallback mantém a data do snapshot usado e alinha os detalhes à mesma data.
+- **Escopo e implantação**: ver [Confiabilidade financeira — primeira entrega](FINANCIAL_DATA_RELIABILITY.md).
 
-### 3. Recomendações (`/recommendations`)
-- **Tabela**: Subscription, Resource Group, Recurso, Tipo, Ação, Prioridade, Economia/mês, Descrição
-- **Filtros**: Data, Subscription, Tipo, Ação, Prioridade, Ordenação
-- **API**: `GET /api/recommendations`
-- **Lógica**: `classifyAction()` classifica em Excluir, Revisar ou Investigar com base no tipo de recurso
+### 2. Recomendações (`/recommendations`)
+- **Exportação** (substitui a antiga tela Relatórios; `/reports` redireciona para cá):
+  - "Abrir relatório HTML" e "Exportar CSV" usam o snapshot publicado da data selecionada
+  - escopo: filtro de Subscription; senão filtro de Time; senão global. Demais filtros da tabela não se aplicam ao arquivo
+  - APIs: `GET /api/report/html`, `GET /api/report/csv`
+- **Economia**: cada recomendação com custo direto (match por ResourceId ou nome + RG + tipo) tem economia na moeda do próprio custo. Totais somam uma única moeda (`savingsCurrency`: a moeda financeira quando há economia nela, senão a mais frequente entre as recomendações); valores em outra moeda aparecem por linha, sem entrar no total.
+- **Visão operacional híbrida** (Blob + Cosmos)
+- **Abas por status**:
+  - Ativas: `New`, `InReview`, `Accepted`, `ApprovedForCleanup`
+  - Pausadas/Ignoradas: `FalsePositive`, `Ignored`, `Snoozed`
+  - Resolvidas: `Resolved`
+- **Tabela**:
+  - Recurso, Resource Group, Subscription, Tipo, Time dono
+  - Severidade, Economia/mês, Ação sugerida
+  - Status, Motivo, UpdatedBy, UpdatedAt, Snooze até
+- **Filtros**: Data, Status, Severidade, Subscription, Tipo, Time, busca por nome/id do recurso
+- **Colunas**:
+  - seletor de colunas (show/hide)
+  - redimensionamento por coluna
+  - ordenação por clique no header
+- **Ações Admin**:
+  - altera status via `PATCH /api/recommendations/{id}/status`
+  - refetch automático com `GET /api/recommendations` após PATCH
+  - feedback visual de sucesso/erro
+- **Reader**: visualização sem ações de edição
+- **API**: `GET /api/recommendations`, `PATCH /api/recommendations/{id}/status`
 
-### 4. Anomalias (`/anomalies`)
-- **Tabela**: Subscription, Custo Atual, Média últimos N dias, Variação %, Meta Diária, Projeção Mensal, Severidade
-- **Filtros**: Data, Período (1-30 dias), Subscription
+### 3. Anomalias (`/anomalies`)
+- **Tabela**: Subscription, Time, Custo Atual, Custo no Ciclo, Média Ciclo/Dia, Vira em, Média últimos N dias, Variação %, Meta Diária, Projeção Mensal, Severidade
+- **Filtros**: Data, Período (1-30 dias), Time, Subscription
 - **API**: `GET /api/cost-anomalies?date=&days=`
+- **UX**:
+  - seletor de colunas (show/hide)
+  - redimensionamento por coluna
+  - ordenação por clique nas colunas, incluindo Time, Custo no Ciclo, Média Ciclo/Dia e Vira em
+- **Ações Admin**:
+  - executar análise manual via `POST /api/cost-anomalies/run`
+  - ajustar override de billing period por subscription (salvar/remover)
+  - endpoints usados: `GET /api/billing/periods/overrides`, `PUT /api/billing/periods/overrides/{subscriptionId}`, `DELETE /api/billing/periods/overrides/{subscriptionId}`
+- **Reader**: visualização sem ações de edição
 - **Nota**: Retorna 404 se não há dados — frontend trata com `.catch()` e exibe mensagem
 
-### 5. Ownership (`/ownership`)
-- **Tabela**: Time, ID, Contato, Subscriptions (badges com nomes)
-- **API**: `GET /api/teams`
-- **Read-only**: Gerenciamento via `POST /api/teams` (Function auth)
-- **Futuro**: Login por usuário com filtro por time
+### 4. Ownership (`/ownership`)
+- **Visualização**: Reader e Admin visualizam times/subscriptions
+- **Administração**: Admin adiciona, edita e remove subscriptions por time
+- **APIs**:
+  - `GET /api/ownership/teams`
+  - `GET /api/ownership/teams/{teamId}`
+  - `POST /api/ownership/teams/{teamId}/subscriptions`
+  - `PUT /api/ownership/teams/{teamId}/subscriptions/{subscriptionId}`
+  - `DELETE /api/ownership/teams/{teamId}/subscriptions/{subscriptionId}`
 
 ## APIs Consumidas
 
 | Endpoint | Método | Auth | Uso |
 |---|---|---|---|
-| `/api/recommendations` | GET | Anonymous | Dashboard, Reports, Recommendations |
-| `/api/cost-anomalies` | GET | Anonymous | Dashboard, Anomalies |
-| `/api/report/html` | GET | Anonymous | Reports (iframe + link) |
-| `/api/report/csv` | GET | Anonymous | Reports (download) |
-| `/api/teams` | GET | Anonymous | Reports (filtro), Ownership |
+| `/api/me` | GET | Bearer | Sessão e roles no portal |
+| `/api/recommendations` | GET | Bearer + role Reader/Admin | Dashboard, Reports, Recommendations |
+| `/api/recommendations/{id}/status` | PATCH | Bearer + role Admin | Atualização de status operacional |
+| `/api/cost-anomalies` | GET | Bearer + role Reader/Admin | Dashboard, Anomalies |
+| `/api/cost-anomalies/run` | POST | Bearer + role Admin | Anomalies (execução manual) |
+| `/api/billing/periods/overrides` | GET | Bearer + role Admin | Lista de overrides manuais de billing period |
+| `/api/billing/periods/overrides/{subscriptionId}` | PUT | Bearer + role Admin | Criar/atualizar override manual de billing period |
+| `/api/billing/periods/overrides/{subscriptionId}` | DELETE | Bearer + role Admin | Remover override manual de billing period |
+| `/api/report/html` | GET | Bearer + role Reader/Admin | Reports (iframe + link) |
+| `/api/report/csv` | GET | Bearer + role Reader/Admin | Reports (download) |
+| `/api/teams` | GET | Bearer + role Reader/Admin | Reports (filtro), Ownership |
+| `/api/ownership/teams` | GET | Bearer + role Reader/Admin | Ownership |
+| `/api/ownership/teams/{teamId}` | GET | Bearer + role Reader/Admin | Ownership |
+| `/api/ownership/teams/{teamId}/subscriptions` | POST | Bearer + role Admin | Ownership |
+| `/api/ownership/teams/{teamId}/subscriptions/{subscriptionId}` | PUT | Bearer + role Admin | Ownership |
+| `/api/ownership/teams/{teamId}/subscriptions/{subscriptionId}` | DELETE | Bearer + role Admin | Ownership |
 
 ### Contrato da API `/api/recommendations`
 
@@ -212,6 +253,15 @@ Requer `.env` com:
 VITE_API_BASE_URL=http://localhost:7071
 ```
 
+Em produção, `VITE_API_BASE_URL` deve ficar vazio. Assim todas as chamadas usam `/api/...` no próprio domínio `https://finops.example.com`, e o Azure Front Door encaminha `/api/*` para a Function App.
+
+Para SSO:
+```
+VITE_AZURE_CLIENT_ID=<app-registration-client-id>
+VITE_AZURE_TENANT_ID=<tenant-id>
+VITE_FINOPS_API_SCOPE=api://<api-app-id>/.default
+```
+
 ### Build de Produção
 ```bash
 cd frontend/finops-portal
@@ -222,7 +272,7 @@ npx vite build                 # Gera dist/
 ### Deploy
 O deploy é automatizado via Azure DevOps (`pipelines/deploy-frontend.yml`):
 1. **Trigger**: Push em `main` com alterações em `frontend/**`
-2. **Build**: `npm ci` + `npm run build` com `VITE_API_BASE_URL` de produção
+2. **Build**: `npm ci` + `npm run build` com `VITE_API_BASE_URL` vazio para usar `/api/*` via Front Door
 3. **Upload**: `az storage blob upload-batch` para `$web` no Storage Account
 4. **Cache**: Purge do Azure Front Door (`finops.example.com`)
 
@@ -257,3 +307,13 @@ Lógica compartilhada entre Dashboard e Recommendations para classificar recurso
 
 - **Login por usuário**: Cada usuário será separado por time e só poderá ver o relatório do seu time
 - **Filtros persistentes**: Salvar último filtro selecionado no localStorage
+
+## Autenticação, SSO e autorização
+
+- Frontend usa MSAL para login SSO no Entra ID e obtenção de token Bearer para API.
+- Backend é a fonte da verdade da autorização:
+  - não autenticado: `401`
+  - autenticado sem role: `403`
+- Roles:
+  - `FinOps.Reader`: leitura
+  - `FinOps.Admin`: leitura + alterações (ex.: PATCH de status, ownership write, execução manual de anomalias e override de billing period).

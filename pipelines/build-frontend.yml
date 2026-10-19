@@ -1,0 +1,57 @@
+trigger:
+  branches:
+    include:
+      - main
+      - homolog
+  paths:
+    include:
+      - frontend/**
+
+resources:
+  repositories:
+    - repository: DEVOPS
+      type: git
+      name: NAP/_git/DevOps
+      # frontend/v4.7.0: build com workingDirectory, installCommand, preBuildScript e buildEnv.
+      ref: 'refs/tags/frontend/v4.7.0'
+
+variables:
+  - template: config.yml
+  - group: FinOps-${{ variables.Ambiente }}-Personal
+
+pool: self-hosted-agent-pool
+
+steps:
+  - template: ./templates/frontend/build-frontend.yml@DEVOPS
+    parameters:
+      ambiente: '${{ variables.Ambiente }}'
+      artifactName: '${{ variables.FrontendArtifactName }}'
+      versionSpecNode: '22.x'
+      workingDirectory: 'frontend/finops-portal'
+      installCommand: 'npm ci'
+      commandBuildWithYarn: 'npm run build'
+      targetPath: 'frontend/finops-portal/dist'
+      # Client/tenant/scope vêm da Library (secrets); o redirect é o domínio do ambiente (config.yml).
+      buildEnv:
+        VITE_ENTRA_CLIENT_ID: $(VITE_ENTRA_CLIENT_ID)
+        VITE_ENTRA_TENANT_ID: $(VITE_ENTRA_TENANT_ID)
+        VITE_FINOPS_API_SCOPE: $(VITE_FINOPS_API_SCOPE)
+        VITE_ENTRA_REDIRECT_URI: 'https://$(PortalDomain)/'
+      # .env.production sobrepõe o .env versionado (localhost). API vazia = mesma origem: o
+      # Front Door de cada ambiente roteia /api/* para a Function.
+      preBuildScript: |
+        set -e
+        for name in VITE_ENTRA_CLIENT_ID VITE_ENTRA_TENANT_ID VITE_FINOPS_API_SCOPE; do
+          value="${!name}"
+          if [ -z "$value" ] || [[ "$value" == '$('* ]]; then
+            echo "##vso[task.logissue type=error]$name vazio na Library FinOps-${{ variables.Ambiente }}-Personal"
+            exit 1
+          fi
+        done
+        {
+          echo "VITE_API_BASE_URL="
+          echo "VITE_ENTRA_CLIENT_ID=$VITE_ENTRA_CLIENT_ID"
+          echo "VITE_ENTRA_TENANT_ID=$VITE_ENTRA_TENANT_ID"
+          echo "VITE_ENTRA_REDIRECT_URI=$VITE_ENTRA_REDIRECT_URI"
+          echo "VITE_FINOPS_API_SCOPE=$VITE_FINOPS_API_SCOPE"
+        } > .env.production

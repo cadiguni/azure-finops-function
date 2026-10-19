@@ -40,11 +40,8 @@ https://finopsplatform-nap-func.azurewebsites.net/api/report/csv?date=2024-04-22
 # Management Groups (deve funcionar)
 https://finopsplatform-nap-func.azurewebsites.net/api/real/management-groups
 
-# Manual Test (sua função de teste)
-https://finopsplatform-nap-func.azurewebsites.net/api/ManualCostAnalysis
-
-# Grafana Health
-https://finopsplatform-nap-func.azurewebsites.net/api/grafana/health
+# Cost API Health
+https://finopsplatform-nap-func.azurewebsites.net/api/cost/health
 ```
 
 ## 📋 **Checklist de Teste**
@@ -77,7 +74,7 @@ az functionapp logs tail --name finopsplatform-nap-func --resource-group finopsp
 ### ❌ "No data found for date"
 - Dados podem não existir para a data
 - Tente sem parâmetros (usa ontem por padrão)
-- Execute análise manual primeiro: `/api/ManualCostAnalysis`
+- Confirme que `CostExportImportTimer` e `CostAnalysisTimer` concluíram para a data esperada
 
 ### ❌ Authorization Error
 - Managed Identity pode precisar permissões

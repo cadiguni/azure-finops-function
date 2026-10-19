@@ -31,15 +31,29 @@ public class CostByServiceDailyTimerFunction
     [Function("CostByServiceDailyTimer")]
     public async Task RunAsync([TimerTrigger("%CostByServiceDailySchedule%")] TimerInfo timer)
     {
-        var targetDate = DateTime.UtcNow.Date.AddDays(-1);
-        var subscriptions = await ResolveSubscriptionsAsync();
+        if (!CostCollectionRouting.IsLegacyByServiceEnabled(_configuration))
+        {
+            _logger.LogInformation(
+                "Coleta legada por serviço desabilitada: source={source}",
+                CostDataSources.CostManagementQueryApi);
+            return;
+        }
+
+        var targetDate = ResolveTargetDate();
+        var resolvedSubscriptions = await ResolveSubscriptionsAsync();
+        var subscriptions = CostCollectionRouting.FilterLegacySubscriptions(
+            _configuration,
+            resolvedSubscriptions);
+        var excludedCount = resolvedSubscriptions.Count - subscriptions.Count;
         var successCount = 0;
         var failureCount = 0;
 
         _logger.LogInformation(
-            "Iniciando coleta de custo por serviço para {date}. Subscriptions: {count}",
+            "Iniciando coleta de custo por serviço: source={source} date={date} subscriptions={count} excludedExportSubscriptions={excludedCount}",
+            CostDataSources.CostManagementQueryApi,
             targetDate.ToString("yyyy-MM-dd"),
-            subscriptions.Count);
+            subscriptions.Count,
+            excludedCount);
 
         foreach (var subscriptionId in subscriptions)
         {
@@ -50,6 +64,12 @@ public class CostByServiceDailyTimerFunction
                     targetDate,
                     targetDate,
                     granularity: "None");
+
+                if (queryResult.Rows.Count == 0)
+                {
+                    throw new InvalidOperationException(
+                        $"Cost Management não retornou dados consolidados para {subscriptionId} em {targetDate:yyyy-MM-dd}.");
+                }
 
                 var byServiceRows = queryResult.Rows
                     .GroupBy(r => new { r.Label, r.Currency })
@@ -91,6 +111,16 @@ public class CostByServiceDailyTimerFunction
             targetDate.ToString("yyyy-MM-dd"),
             successCount,
             failureCount);
+    }
+
+    private DateTime ResolveTargetDate()
+    {
+        var delayDays = Math.Clamp(
+            _configuration.GetValue<int?>("COST_DATA_DELAY_DAYS") ?? 2,
+            1,
+            7);
+
+        return DateTime.UtcNow.Date.AddDays(-delayDays);
     }
 
     private async Task<List<string>> ResolveSubscriptionsAsync()

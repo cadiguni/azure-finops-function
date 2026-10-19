@@ -1,11 +1,11 @@
 # Storage Account para Frontend Static Website
 # O RG é criado pelo terraform-function, referenciamos via data source
 data "azurerm_resource_group" "rg" {
-  name = "${local.aplicacao}-${local.setor}-rg"
+  name = "${local.nome_base}-rg"
 }
 
 resource "azurerm_storage_account" "frontend" {
-  name                     = "${lower(local.aplicacao)}${lower(local.setor)}webstg"
+  name                     = "${local.nome_base_storage}webstg"
   resource_group_name      = data.azurerm_resource_group.rg.name
   location                 = local.localizacao
   account_tier             = "Standard"

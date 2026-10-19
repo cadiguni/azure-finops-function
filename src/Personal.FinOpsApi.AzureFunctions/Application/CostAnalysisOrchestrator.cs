@@ -16,6 +16,8 @@ public class CostAnalysisOrchestrator
     private readonly AppServiceAnalyzer _appServiceAnalyzer;
     private readonly FunctionAppAnalyzer _functionAppAnalyzer;
     private readonly LogAnalyticsAnalyzer _logAnalyticsAnalyzer;
+    private readonly SqlDatabaseAnalyzer _sqlDatabaseAnalyzer;
+    private readonly CosmosDatabaseAnalyzer _cosmosDatabaseAnalyzer;
     private readonly AnalysisStorageService _storageService;
     private readonly LogAnalyticsDataCollectorService _logAnalyticsService;
 
@@ -29,6 +31,8 @@ public class CostAnalysisOrchestrator
         AppServiceAnalyzer appServiceAnalyzer,
         FunctionAppAnalyzer functionAppAnalyzer,
         LogAnalyticsAnalyzer logAnalyticsAnalyzer,
+        SqlDatabaseAnalyzer sqlDatabaseAnalyzer,
+        CosmosDatabaseAnalyzer cosmosDatabaseAnalyzer,
         AnalysisStorageService storageService,
         LogAnalyticsDataCollectorService logAnalyticsService,
 
@@ -41,6 +45,8 @@ public class CostAnalysisOrchestrator
         _appServiceAnalyzer = appServiceAnalyzer;
         _functionAppAnalyzer = functionAppAnalyzer;
         _logAnalyticsAnalyzer = logAnalyticsAnalyzer;
+        _sqlDatabaseAnalyzer = sqlDatabaseAnalyzer;
+        _cosmosDatabaseAnalyzer = cosmosDatabaseAnalyzer;
         _storageService = storageService;
         _logAnalyticsService = logAnalyticsService;
 
@@ -109,6 +115,16 @@ public class CostAnalysisOrchestrator
                 tasks.Add(AnalyzeAppServicesAsync(request));
             }
 
+            if (request.AnalysisOptions.SqlDatabases)
+            {
+                tasks.Add(AnalyzeSqlDatabasesAsync(request));
+            }
+
+            if (request.AnalysisOptions.CosmosDatabases)
+            {
+                tasks.Add(AnalyzeCosmosDatabasesAsync(request));
+            }
+
             //  EXECUTAR SEQUENCIALMENTE para evitar 429 (em vez de paralelo)
             _logger.LogInformation(" Executando {count} análises sequenciais para evitar rate limiting", tasks.Count);
             
@@ -128,11 +144,6 @@ public class CostAnalysisOrchestrator
                     // Continua com outras análises mesmo se uma falhar
                 }
             }
-
-            // Futuras análises virão aqui:
-            // if (request.AnalysisOptions.Vms) { ... }
-            // if (request.AnalysisOptions.AppServices) { ... }
-            // if (request.AnalysisOptions.SqlDatabases) { ... }
 
             result.Recommendations = allRecommendations;
             result.Summary = BuildSummary(allRecommendations);
@@ -367,19 +378,100 @@ public class CostAnalysisOrchestrator
     }
 
     /// <summary>
+    /// Análise específica de SQL Databases com foco em otimização de custo.
+    /// </summary>
+    private async Task<List<CostRecommendation>> AnalyzeSqlDatabasesAsync(CostAnalysisRequest request)
+    {
+        try
+        {
+            Console.WriteLine(" Iniciando análise de SQL Databases...");
+
+            if (request.Scope == "subscription" && !string.IsNullOrEmpty(request.SubscriptionId))
+            {
+                var standardResult = await _sqlDatabaseAnalyzer.AnalyzeAsync(
+                    request.SubscriptionId,
+                    request.AnalysisPeriodDays,
+                    request.DryRun);
+
+                return ConvertToLegacyFormat(standardResult.Findings);
+            }
+
+            Console.WriteLine(" SQL Databases: Escopo não suportado ou SubscriptionId não fornecido");
+            return new List<CostRecommendation>();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($" Erro na análise de SQL Databases: {ex.Message}");
+            return new List<CostRecommendation>();
+        }
+    }
+
+    /// <summary>
+    /// Análise específica de Cosmos DB com foco em otimização de custo.
+    /// </summary>
+    private async Task<List<CostRecommendation>> AnalyzeCosmosDatabasesAsync(CostAnalysisRequest request)
+    {
+        try
+        {
+            Console.WriteLine(" Iniciando análise de Cosmos DB...");
+
+            if (request.Scope == "subscription" && !string.IsNullOrEmpty(request.SubscriptionId))
+            {
+                var standardResult = await _cosmosDatabaseAnalyzer.AnalyzeAsync(
+                    request.SubscriptionId,
+                    request.AnalysisPeriodDays,
+                    request.DryRun);
+
+                return ConvertToLegacyFormat(standardResult.Findings);
+            }
+
+            Console.WriteLine(" Cosmos DB: Escopo não suportado ou SubscriptionId não fornecido");
+            return new List<CostRecommendation>();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($" Erro na análise de Cosmos DB: {ex.Message}");
+            return new List<CostRecommendation>();
+        }
+    }
+
+    /// <summary>
     ///  Conversão do StandardFinding (novo) para CostRecommendation (legacy)
     /// </summary>
     private List<CostRecommendation> ConvertToLegacyFormat(List<Models.StandardFinding> standardFindings)
     {
-        return standardFindings.Select(finding => new CostRecommendation
+        return standardFindings.Select(finding =>
         {
+            var sourceFromMetadata = TryGetStringMetadata(finding.Metadata, "costSource", null);
+            var normalizedSource = NormalizeCostSource(sourceFromMetadata, finding.EstimatedMonthlyCost);
+            var confidenceFromMetadata = TryGetStringMetadata(finding.Metadata, "costMatchConfidence", null);
+            var normalizedConfidence = NormalizeCostConfidence(confidenceFromMetadata, normalizedSource);
+            var noteFromMetadata = TryGetStringMetadata(finding.Metadata, "costNote", null);
+            var effectiveNote = string.IsNullOrWhiteSpace(noteFromMetadata)
+                ? BuildDefaultCostNote(normalizedSource, normalizedConfidence)
+                : noteFromMetadata;
+
+            return new CostRecommendation
+            {
             SubscriptionId = finding.SubscriptionId,
             ResourceId = finding.ResourceId,
             ResourceName = finding.ResourceName,
             ResourceType = finding.ResourceType,
             Priority = finding.Priority,
             EstimatedMonthlyCost = finding.EstimatedMonthlyCost,
+            CostProvenance = finding.CostProvenance,
+            ObservedCost = finding.ObservedCost,
+            CostAmount = normalizedSource != CostMatchSources.NotMatched ? finding.EstimatedMonthlyCost : null,
+            CostCurrency = finding.Currency,
+            CostPeriodFrom = TryGetDateTimeMetadata(finding.Metadata, "costPeriodFrom"),
+            CostPeriodTo = TryGetDateTimeMetadata(finding.Metadata, "costPeriodTo"),
+            CostSource = normalizedSource,
+            CostMatchConfidence = normalizedConfidence,
+            CostMatchedResourceId = TryGetStringMetadata(finding.Metadata, "costMatchedResourceId", null),
+            CostNote = effectiveNote ?? "Não foi possível associar custo para este recurso no período consultado.",
             PotentialMonthlySavings = finding.EstimatedMonthlySavings,
+            SavingsStatus = TryGetStringMetadata(finding.Metadata, "savingsStatus", null)
+                ?? (finding.EstimatedMonthlySavings > 0 ? "Quantified" : "NotEstimated"),
             Recommendation = finding.Recommendation,
             Description = finding.Description,
             Impact = "Medium", // Usar valor padrão - não está no StandardFinding
@@ -393,7 +485,92 @@ public class CostAnalysisOrchestrator
                 : new Dictionary<string, string>(),
             LastEvaluationDate = DateTime.UtcNow,
             Type = finding.Type
+            };
         }).ToList();
+    }
+
+    private static string? TryGetStringMetadata(
+        Dictionary<string, object> metadata,
+        string key,
+        string? fallback)
+    {
+        if (metadata.TryGetValue(key, out var value))
+        {
+            var text = value?.ToString();
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                return text;
+            }
+        }
+
+        return fallback;
+    }
+
+    private static DateTime? TryGetDateTimeMetadata(Dictionary<string, object> metadata, string key)
+    {
+        if (!metadata.TryGetValue(key, out var value) || value == null)
+        {
+            return null;
+        }
+
+        if (value is DateTime dt)
+        {
+            return dt;
+        }
+
+        return DateTime.TryParse(value.ToString(), out var parsed) ? parsed : null;
+    }
+
+    private static string NormalizeCostSource(string? rawSource, decimal estimatedMonthlyCost)
+    {
+        if (!string.IsNullOrWhiteSpace(rawSource))
+        {
+            return rawSource switch
+            {
+                "cost-management" => CostMatchSources.ResourceId,
+                "sku-fallback" => CostMatchSources.ServiceAndMeter,
+                "no-cost-data" => CostMatchSources.NotMatched,
+                _ => rawSource
+            };
+        }
+
+        return estimatedMonthlyCost > 0 ? CostMatchSources.ResourceId : CostMatchSources.NotMatched;
+    }
+
+    private static string NormalizeCostConfidence(string? rawConfidence, string normalizedSource)
+    {
+        if (!string.IsNullOrWhiteSpace(rawConfidence))
+        {
+            return rawConfidence;
+        }
+
+        return normalizedSource switch
+        {
+            CostMatchSources.ResourceId => CostMatchConfidenceLevels.High,
+            CostMatchSources.ParentResource => CostMatchConfidenceLevels.Medium,
+            CostMatchSources.ServiceAndMeter => CostMatchConfidenceLevels.Low,
+            _ => CostMatchConfidenceLevels.Low
+        };
+    }
+
+    private static string BuildDefaultCostNote(string source, string confidence)
+    {
+        if (source == CostMatchSources.NotMatched)
+        {
+            return "Não foi possível associar custo para este recurso no período consultado.";
+        }
+
+        if (confidence == CostMatchConfidenceLevels.Low)
+        {
+            return "Custo aproximado por serviço/meter. Não tratar como valor exato do recurso.";
+        }
+
+        if (confidence == CostMatchConfidenceLevels.Medium)
+        {
+            return "Custo associado por parent resource. Pode representar custo agregado.";
+        }
+
+        return "Custo associado por ResourceId exato.";
     }
 
     /// <summary>
@@ -582,6 +759,14 @@ public class CostAnalysisOrchestrator
                 () => {
                     _logger.LogInformation(" [5/5] Analisando Log Analytics workspaces para {subscriptionId}...", subscriptionId);
                     return _logAnalyticsAnalyzer.AnalyzeAsync(subscriptionId);
+                },
+                () => {
+                    _logger.LogInformation(" [6/7] Analisando SQL Databases para {subscriptionId}...", subscriptionId);
+                    return _sqlDatabaseAnalyzer.AnalyzeAsync(subscriptionId);
+                },
+                () => {
+                    _logger.LogInformation(" [7/7] Analisando Cosmos DB para {subscriptionId}...", subscriptionId);
+                    return _cosmosDatabaseAnalyzer.AnalyzeAsync(subscriptionId);
                 }
             };
 
@@ -744,6 +929,20 @@ public class CostAnalysisOrchestrator
             _logger.LogInformation(" [{mode}] Analisando VMs Idle (MUITO PESADO - Azure Monitor)...", mode);
             var vmResult = await _idleVmAnalyzer.AnalyzeAsync(subscriptionId);
             results.Add(vmResult);
+
+            if (isProductionMode) await Task.Delay(delayBetweenAnalyzers);
+
+            // 6⃣ SQL Databases
+            _logger.LogInformation(" [{mode}] Analisando SQL Databases...", mode);
+            var sqlResult = await _sqlDatabaseAnalyzer.AnalyzeAsync(subscriptionId);
+            results.Add(sqlResult);
+
+            if (isProductionMode) await Task.Delay(delayBetweenAnalyzers);
+
+            // 7⃣ Cosmos DB
+            _logger.LogInformation(" [{mode}] Analisando Cosmos DB...", mode);
+            var cosmosResult = await _cosmosDatabaseAnalyzer.AnalyzeAsync(subscriptionId);
+            results.Add(cosmosResult);
 
             //  CONSOLIDAR RESULTADOS
             var allFindings = results.OfType<StandardAnalyzerResult>().SelectMany(r => r.Findings).ToList();
@@ -972,6 +1171,64 @@ public class CostAnalysisOrchestrator
         catch (Exception ex)
         {
             _logger.LogError(ex, " [STEP-LOGANALYTICS] Erro na análise de Log Analytics para {subscriptionId}", subscriptionId);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Analisa apenas SQL Databases (step específico)
+    /// </summary>
+    public async Task<IList<object>> AnalyzeSqlDatabasesOnlyAsync(string subscriptionId)
+    {
+        _logger.LogInformation(" [STEP-SQL] Iniciando análise de SQL Databases para {subscriptionId}", subscriptionId);
+
+        var findings = new List<object>();
+
+        try
+        {
+            var sqlResult = await _sqlDatabaseAnalyzer.AnalyzeAsync(subscriptionId);
+            if (sqlResult?.Findings != null)
+            {
+                findings.AddRange(sqlResult.Findings.Cast<object>());
+            }
+
+            _logger.LogInformation(" [STEP-SQL] {count} findings encontrados para {subscriptionId}",
+                findings.Count, subscriptionId);
+
+            return findings;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, " [STEP-SQL] Erro na análise de SQL Databases para {subscriptionId}", subscriptionId);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Analisa apenas Cosmos DB (step específico)
+    /// </summary>
+    public async Task<IList<object>> AnalyzeCosmosDatabasesOnlyAsync(string subscriptionId)
+    {
+        _logger.LogInformation(" [STEP-COSMOS] Iniciando análise de Cosmos DB para {subscriptionId}", subscriptionId);
+
+        var findings = new List<object>();
+
+        try
+        {
+            var cosmosResult = await _cosmosDatabaseAnalyzer.AnalyzeAsync(subscriptionId);
+            if (cosmosResult?.Findings != null)
+            {
+                findings.AddRange(cosmosResult.Findings.Cast<object>());
+            }
+
+            _logger.LogInformation(" [STEP-COSMOS] {count} findings encontrados para {subscriptionId}",
+                findings.Count, subscriptionId);
+
+            return findings;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, " [STEP-COSMOS] Erro na análise de Cosmos DB para {subscriptionId}", subscriptionId);
             throw;
         }
     }

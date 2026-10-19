@@ -20,24 +20,7 @@ public class AppServiceAnalyzer
     private readonly ILogger<AppServiceAnalyzer> _logger;
 
     //  Tabela de preços aproximados (FALLBACK - usado quando Cost Management não retorna dados)
-    private static readonly Dictionary<string, decimal> AppServicePlanPricesFallback = new()
-    {
-        { "F1", 0m },        // Free
-        { "D1", 12m },       // Shared
-        { "B1", 55m },       // Basic
-        { "B2", 110m },      
-        { "B3", 220m },      
-        { "S1", 73m },       // Standard
-        { "S2", 146m },      
-        { "S3", 292m },      
-        { "P1v2", 146m },    // Premium v2
-        { "P1v3", 200m },    // Premium v3
-        { "P2v2", 292m },    
-        { "P2v3", 400m },
-        { "P3v2", 584m },
-        { "P3v3", 800m },
-        { "Y1", 75m }        // Consumption (estimate)
-    };
+
 
     public AppServiceAnalyzer(
         HttpClient httpClient, 
@@ -236,10 +219,7 @@ public class AppServiceAnalyzer
         return result;
     }
 
-    private decimal GetAppServicePlanCostFallback(string sku)
-    {
-        return AppServicePlanPricesFallback.GetValueOrDefault(sku, 100m); // Default R$100/mês
-    }
+
 
     /// <summary>
     /// Analisa um único App Service Plan - busca métricas e retorna finding se subutilizado
@@ -308,9 +288,9 @@ public class AppServiceAnalyzer
 
         // Custo real
         var costData = await _costLookupService.GetResourceCostDataAsync(subscriptionId, resourceId);
-        var dailyCost = costData.DailyCost > 0 ? costData.DailyCost : GetAppServicePlanCostFallback(sku) / 30;
-        var estimatedMonthlyCost = costData.MonthlyCost > 0 ? costData.MonthlyCost : GetAppServicePlanCostFallback(sku);
-        var costSource = costData.MonthlyCost > 0 ? "cost-management" : "sku-fallback";
+        var dailyCost = costData.DailyCost;
+        var estimatedMonthlyCost = costData.MonthlyCost;
+        var costSource = costData.CostSource;
         var monthlySavings = estimatedMonthlyCost * 0.75m;
 
         return new StandardFinding
@@ -324,8 +304,10 @@ public class AppServiceAnalyzer
             SubscriptionId = subscriptionId,
             DailyCost = dailyCost,
             EstimatedMonthlyCost = estimatedMonthlyCost,
+            CostProvenance = costData.Provenance,
+            ObservedCost = costData.ObservedCost,
             EstimatedMonthlySavings = monthlySavings,
-            Currency = "BRL",
+            Currency = string.IsNullOrWhiteSpace(costData.Currency) ? "BRL" : costData.Currency,
             Priority = estimatedMonthlyCost > 200 ? FindingPriorities.HIGH : 
                       estimatedMonthlyCost > 100 ? FindingPriorities.MEDIUM : FindingPriorities.LOW,
             Confidence = webApps.Count == 0 ? 0.9 : 0.7,
@@ -346,6 +328,11 @@ public class AppServiceAnalyzer
                 { "avgRequests", avgRequests },
                 { "underutilizedDays", analysisPeriodDays },
                 { "costSource", costSource },
+                { "costMatchConfidence", costData.CostMatchConfidence },
+                { "costMatchedResourceId", costData.CostMatchedResourceId ?? resourceId },
+                { "costPeriodFrom", costData.CostPeriodFrom ?? DateTime.UtcNow.Date.AddDays(-30) },
+                { "costPeriodTo", costData.CostPeriodTo ?? DateTime.UtcNow.Date },
+                { "costNote", costData.CostNote ?? string.Empty },
                 { "realCostFromApi", costData.MonthlyCost }
             }
         };

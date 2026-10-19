@@ -176,7 +176,7 @@ public class SubscriptionDiscoveryService
     private List<string> GetFallbackSubscription()
     {
         var subscriptionId = _configuration["AZURE_SUBSCRIPTION_ID"] ?? 
-                            "0ce85ffc-37b5-4729-9a86-c7db4f958628";
+                            "00000000-0000-0000-0000-00000000a002";
         
         _logger.LogInformation(" Usando fallback subscription: {subscriptionId}", subscriptionId);
         return new List<string> { subscriptionId };

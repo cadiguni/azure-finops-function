@@ -73,6 +73,12 @@ public class StandardAnalyzerResult
 /// </summary>
 public class StandardFinding
 {
+    [JsonPropertyName("costProvenance")]
+    public CostReadProvenance? CostProvenance { get; set; }
+
+    [JsonPropertyName("observedCost")]
+    public decimal? ObservedCost { get; set; }
+
     /// <summary>
     /// Tipo da recomendação (obrigatório)
     /// </summary>
@@ -187,6 +193,10 @@ public static class FindingTypes
     public const string IDLE_VM = "IdleVirtualMachine";
     public const string UNDERUTILIZED_APP_SERVICE = "UnderUtilizedAppService";
     public const string UNDERUTILIZED_FUNCTION_APP = "UnderUtilizedFunctionApp";
+    public const string UNDERUTILIZED_SQL_DATABASE = "UnderUtilizedSqlDatabase";
+    public const string UNDERUTILIZED_COSMOS_DB = "UnderUtilizedCosmosDb";
+    public const string SQL_DATABASE_COST_REVIEW = "SqlDatabaseCostReview";
+    public const string COSMOS_DB_COST_REVIEW = "CosmosDbCostReview";
     
     // Log Analytics Finding Types
     public const string LOG_ANALYTICS_RETENTION = "LogAnalyticsRetention";
@@ -212,4 +222,6 @@ public static class AnalyzerNames
     public const string APP_SERVICE_ANALYZER = "AppServiceAnalyzer";
     public const string FUNCTION_APP_ANALYZER = "FunctionAppAnalyzer";
     public const string LOG_ANALYTICS_ANALYZER = "LogAnalyticsAnalyzer";
+    public const string SQL_DATABASE_ANALYZER = "SqlDatabaseAnalyzer";
+    public const string COSMOS_DATABASE_ANALYZER = "CosmosDatabaseAnalyzer";
 }

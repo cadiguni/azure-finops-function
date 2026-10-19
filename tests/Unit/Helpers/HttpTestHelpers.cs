@@ -103,6 +103,21 @@ internal static class HttpTestHelpers
         return new TestHttpRequestData(context, "GET", url);
     }
 
+    public static TestHttpRequestData CreateRequest(string method, string url, string? body = null)
+    {
+        var context = new MockFunctionContext();
+        var request = new TestHttpRequestData(context, method, url);
+        if (!string.IsNullOrWhiteSpace(body))
+        {
+            using var writer = new StreamWriter(request.Body, leaveOpen: true);
+            writer.Write(body);
+            writer.Flush();
+            request.Body.Seek(0, SeekOrigin.Begin);
+        }
+
+        return request;
+    }
+
     public static async Task<string> ReadBodyAsStringAsync(HttpResponseData response)
     {
         response.Body.Seek(0, SeekOrigin.Begin);

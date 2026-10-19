@@ -3,6 +3,12 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
 
+# Azure Functions local settings (contains secrets - never commit)
+local.settings.json
+
+# Terraform provider cache and local backend metadata
+.terraform/
+
 bin/
 obj/
 
@@ -358,3 +364,6 @@ MigrationBackup/
 
 #Azurite emulador de armazenamento
 .azurite/
+
+# Cache do LightSwitch
+*.lscache

@@ -19,10 +19,6 @@ public class QueueService
     //  Queue names from configuration
     private readonly string _subscriptionAnalysisQueue;
     private readonly string _subscriptionAnalysisProductionQueue;  //  NOVA: Queue exclusiva para produção
-    private readonly string _storageAnalysisQueue;
-    private readonly string _vmAnalysisQueue;
-    private readonly string _appServiceAnalysisQueue;
-    private readonly string _resultsQueue;
     private readonly string _costByResourceQueue;
     private readonly string _costByResourceStarterQueue;
     
@@ -44,15 +40,11 @@ public class QueueService
         //  Queue names from app settings
         _subscriptionAnalysisQueue = _configuration["QUEUE_SUBSCRIPTION_ANALYSIS"] ?? "subscription-analysis";
         _subscriptionAnalysisProductionQueue = _configuration["QUEUE_SUBSCRIPTION_ANALYSIS_PROD"] ?? "subscription-analysis-production";
-        _storageAnalysisQueue = _configuration["QUEUE_STORAGE_ANALYSIS"] ?? "storage-analysis";
-        _vmAnalysisQueue = _configuration["QUEUE_VM_ANALYSIS"] ?? "vm-analysis";
-        _appServiceAnalysisQueue = _configuration["QUEUE_APPSERVICE_ANALYSIS"] ?? "appservice-analysis";
-        _resultsQueue = _configuration["QUEUE_ANALYSIS_RESULTS"] ?? "analysis-results";
         _costByResourceQueue = _configuration["QUEUE_COST_BY_RESOURCE"] ?? "cost-by-resource-analysis";
         _costByResourceStarterQueue = _configuration["QUEUE_COST_BY_RESOURCE_STARTER"] ?? "cost-by-resource-starter";
         
         //  CONFIGURAÇÃO DE PRODUÇÃO
-        _productionSubscriptionId = _configuration["PRODUCTION_SUBSCRIPTION_ID"] ?? "504a622c-3995-46c5-8ba7-8edb365ed17b";
+        _productionSubscriptionId = _configuration["PRODUCTION_SUBSCRIPTION_ID"] ?? "00000000-0000-0000-0000-00000000a004";
         
         _logger.LogInformation(" QueueService iniciado - Queue processing: {enabled}, Production Sub: {prodSub}", 
             _queueProcessingEnabled, _productionSubscriptionId);
@@ -113,174 +105,6 @@ public class QueueService
         catch (Exception ex)
         {
             _logger.LogError(ex, " Erro ao enviar subscription {subscriptionId} para queue", subscriptionId);
-            return false;
-        }
-    }
-
-    /// <summary>
-    ///  Envia análise de Storage Account para queue especializada
-    /// </summary>
-    public async Task<bool> SendStorageAnalysisAsync(string subscriptionId, List<string> storageAccountIds)
-    {
-        if (!_queueProcessingEnabled)
-        {
-            return false;
-        }
-
-        try
-        {
-            var message = new
-            {
-                SubscriptionId = subscriptionId,
-                StorageAccounts = storageAccountIds,
-                AnalysisType = "storage",
-                Timestamp = DateTime.UtcNow,
-                RequestId = Guid.NewGuid().ToString()
-            };
-
-            var jsonMessage = JsonSerializer.Serialize(message);
-            var serviceBusMessage = new ServiceBusMessage(jsonMessage)
-            {
-                MessageId = Guid.NewGuid().ToString(),
-                Subject = "storage-analysis"
-            };
-
-            var sender = _serviceBusClient.CreateSender(_storageAnalysisQueue);
-            await sender.SendMessageAsync(serviceBusMessage);
-            await sender.DisposeAsync();
-
-            _logger.LogInformation(" Storage analysis para {subscriptionId} enviada - {count} storage accounts", subscriptionId, storageAccountIds.Count);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, " Erro ao enviar storage analysis para queue");
-            return false;
-        }
-    }
-
-    /// <summary>
-    ///  Envia análise de VMs para queue especializada
-    /// </summary>
-    public async Task<bool> SendVmAnalysisAsync(string subscriptionId, List<string> vmIds)
-    {
-        if (!_queueProcessingEnabled)
-        {
-            return false;
-        }
-
-        try
-        {
-            var message = new
-            {
-                SubscriptionId = subscriptionId,
-                VmIds = vmIds,
-                AnalysisType = "vm",
-                Timestamp = DateTime.UtcNow,
-                RequestId = Guid.NewGuid().ToString()
-            };
-
-            var jsonMessage = JsonSerializer.Serialize(message);
-            var serviceBusMessage = new ServiceBusMessage(jsonMessage)
-            {
-                MessageId = Guid.NewGuid().ToString(),
-                Subject = "vm-analysis"
-            };
-
-            var sender = _serviceBusClient.CreateSender(_vmAnalysisQueue);
-            await sender.SendMessageAsync(serviceBusMessage);
-            await sender.DisposeAsync();
-
-            _logger.LogInformation(" VM analysis para {subscriptionId} enviada - {count} VMs", subscriptionId, vmIds.Count);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, " Erro ao enviar VM analysis para queue");
-            return false;
-        }
-    }
-
-    /// <summary>
-    ///  Envia análise de App Services para queue
-    /// </summary>
-    public async Task<bool> SendAppServiceAnalysisAsync(string subscriptionId, List<string> appServiceIds)
-    {
-        if (!_queueProcessingEnabled)
-        {
-            return false;
-        }
-
-        try
-        {
-            var message = new
-            {
-                SubscriptionId = subscriptionId,
-                AppServices = appServiceIds,
-                AnalysisType = "appservice",
-                Timestamp = DateTime.UtcNow,
-                RequestId = Guid.NewGuid().ToString()
-            };
-
-            var jsonMessage = JsonSerializer.Serialize(message);
-            var serviceBusMessage = new ServiceBusMessage(jsonMessage)
-            {
-                MessageId = Guid.NewGuid().ToString(),
-                Subject = "appservice-analysis"
-            };
-
-            var sender = _serviceBusClient.CreateSender(_appServiceAnalysisQueue);
-            await sender.SendMessageAsync(serviceBusMessage);
-            await sender.DisposeAsync();
-
-            _logger.LogInformation(" App Service analysis para {subscriptionId} enviada - {count} App Services", subscriptionId, appServiceIds.Count);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, " Erro ao enviar App Service analysis para queue");
-            return false;
-        }
-    }
-
-    /// <summary>
-    ///  Envia resultados consolidados para queue
-    /// </summary>
-    public async Task<bool> SendAnalysisResultsAsync(object analysisResults, string analysisType, string subscriptionId)
-    {
-        if (!_queueProcessingEnabled)
-        {
-            return false;
-        }
-
-        try
-        {
-            var message = new
-            {
-                SubscriptionId = subscriptionId,
-                AnalysisType = analysisType,
-                AnalysisResult = analysisResults,
-                Timestamp = DateTime.UtcNow,
-                RequestId = Guid.NewGuid().ToString()
-            };
-
-            var jsonMessage = JsonSerializer.Serialize(message);
-            var serviceBusMessage = new ServiceBusMessage(jsonMessage)
-            {
-                MessageId = Guid.NewGuid().ToString(),
-                Subject = $"results-{analysisType}"
-            };
-
-            var sender = _serviceBusClient.CreateSender(_resultsQueue);
-            await sender.SendMessageAsync(serviceBusMessage);
-            await sender.DisposeAsync();
-
-            _logger.LogInformation(" Resultados de {analysisType} enviados para consolidação", analysisType);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, " Erro ao enviar resultados para queue");
             return false;
         }
     }

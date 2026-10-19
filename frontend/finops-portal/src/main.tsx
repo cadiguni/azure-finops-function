@@ -1,41 +1,19 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { HashRouter } from 'react-router-dom'
-import { PublicClientApplication, EventType } from '@azure/msal-browser'
-import type { AuthenticationResult } from '@azure/msal-browser'
 import { MsalProvider } from '@azure/msal-react'
-import { msalConfig } from './auth/authConfig'
+import { initializeMsal, msalInstance } from './auth/msalInstance'
 import './index.css'
 import App from './App.tsx'
 
-const msalInstance = new PublicClientApplication(msalConfig);
-
-msalInstance.initialize().then(() => {
-  msalInstance.handleRedirectPromise().then((response: AuthenticationResult | null) => {
-    if (response) {
-      msalInstance.setActiveAccount(response.account);
-    } else {
-      const accounts = msalInstance.getAllAccounts();
-      if (accounts.length > 0) {
-        msalInstance.setActiveAccount(accounts[0]);
-      }
-    }
-
-    msalInstance.addEventCallback((event) => {
-      if (event.eventType === EventType.LOGIN_SUCCESS && event.payload) {
-        const payload = event.payload as AuthenticationResult;
-        msalInstance.setActiveAccount(payload.account);
-      }
-    });
-
-    createRoot(document.getElementById('root')!).render(
-      <StrictMode>
-        <MsalProvider instance={msalInstance}>
-          <HashRouter>
-            <App />
-          </HashRouter>
-        </MsalProvider>
-      </StrictMode>,
-    );
-  });
+initializeMsal().then(() => {
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <MsalProvider instance={msalInstance}>
+        <HashRouter>
+          <App />
+        </HashRouter>
+      </MsalProvider>
+    </StrictMode>,
+  );
 });

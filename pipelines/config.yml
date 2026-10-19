@@ -1,4 +1,26 @@
 variables:
-  Setor: 'personal'
-  NomeAplicacao: 'finops-api'
-  ArtifactName: 'FinOpsBuildFunction-personal'
+  # main → prod; qualquer outra branch (ex.: homolog) → hml.
+  ${{ if eq(variables['Build.SourceBranchName'], 'main') }}:
+    Ambiente: prod
+    # Prod mantém a nomenclatura legada finopsplatform-nap-*; o template de deploy monta <NomeAplicacao>-<SufixoRecursos>-func.
+    SufixoRecursos: nap
+    # Portal (redirect do Entra) e Front Door: rota /* → storage do portal, /api/* → Function.
+    PortalDomain: finops.example.com
+    FrontDoorEndpointName: finopsplatform-dev-fde
+  ${{ else }}:
+    Ambiente: hml
+    SufixoRecursos: hml
+    PortalDomain: finops-hml.example.com
+    FrontDoorEndpointName: finopsplatform-hml-fde
+
+  # Profile AFD compartilhado pelos ambientes (criado fora do Terraform).
+  FrontDoorResourceGroup: finopsplatform-nap-rg
+  FrontDoorProfileName: frontdoor2-dev-afd
+
+  # Artefatos por ambiente: hml e prod usam as mesmas pipelines (mesma pasta no agente) e não podem se misturar.
+  # Sem "prod" no nome: o template de deploy recusa zip com "prod" no caminho quando Ambiente != prod (prod passa "nap").
+  ArtifactName: 'FinOpsFunction-${{ variables.SufixoRecursos }}'
+  FrontendArtifactName: 'FinOpsPortal-${{ variables.SufixoRecursos }}'
+  NomeAplicacao: 'finopsplatform'
+  Setor: 'nap'
+  RESULTS_CONTAINER_NAME: 'finops-analysis'

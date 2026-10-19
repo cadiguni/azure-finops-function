@@ -2,6 +2,7 @@ using Azure.Messaging.ServiceBus;
 using Personal.FinOpsApi.AzureFunctions.Models;
 using Personal.FinOpsApi.AzureFunctions.Services;
 using Microsoft.Azure.Functions.Worker;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
 
@@ -12,17 +13,20 @@ public class CostByResourceQueueFunction
     private readonly ICostManagementClient _costManagementClient;
     private readonly ICostStorageRepository _costStorageRepository;
     private readonly QueueService _queueService;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<CostByResourceQueueFunction> _logger;
 
     public CostByResourceQueueFunction(
         ICostManagementClient costManagementClient,
         ICostStorageRepository costStorageRepository,
         QueueService queueService,
+        IConfiguration configuration,
         ILogger<CostByResourceQueueFunction> logger)
     {
         _costManagementClient = costManagementClient;
         _costStorageRepository = costStorageRepository;
         _queueService = queueService;
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -35,6 +39,16 @@ public class CostByResourceQueueFunction
         if (payload == null || string.IsNullOrWhiteSpace(payload.SubscriptionId))
         {
             _logger.LogError("Mensagem inválida em CostByResourceQueue: {body}", message.Body.ToString());
+            return;
+        }
+
+        if (!CostCollectionRouting.IsLegacyByResourceEnabled(_configuration) ||
+            CostCollectionRouting.IsCutoverSubscription(_configuration, payload.SubscriptionId))
+        {
+            _logger.LogInformation(
+                "Mensagem legada por recurso ignorada: subscriptionId={subscriptionId} source={source} reason=export-routed-or-disabled",
+                payload.SubscriptionId,
+                CostDataSources.CostManagementQueryApi);
             return;
         }
 
@@ -58,6 +72,12 @@ public class CostByResourceQueueFunction
                     targetDate,
                     granularity: "None",
                     serviceFilter: null);
+            }
+
+            if (queryResult.Rows.Count == 0)
+            {
+                throw new CostDataNotAvailableException(
+                    $"Cost Management não retornou dados consolidados para {payload.SubscriptionId} em {targetDate:yyyy-MM-dd}.");
             }
 
             var byResourceRows = queryResult.Rows
@@ -88,16 +108,24 @@ public class CostByResourceQueueFunction
                 targetDate.ToString("yyyy-MM-dd"),
                 byResourceRows.Count);
         }
-        catch (HttpRequestException ex) when (IsTooManyRequests(ex) && payload.RetryCount < 4)
+        catch (Exception ex) when (IsRetryableCostFailure(ex) && payload.RetryCount < 4)
         {
             var nextRetry = payload.RetryCount + 1;
-            var delayMinutes = nextRetry switch
-            {
-                1 => 2,
-                2 => 5,
-                3 => 10,
-                _ => 20
-            };
+            var delayMinutes = ex is CostDataNotAvailableException
+                ? nextRetry switch
+                {
+                    1 => 30,
+                    2 => 60,
+                    3 => 120,
+                    _ => 240
+                }
+                : nextRetry switch
+                {
+                    1 => 2,
+                    2 => 5,
+                    3 => 10,
+                    _ => 20
+                };
 
             var retryPayload = new CostByResourceQueueMessage
             {
@@ -118,8 +146,9 @@ public class CostByResourceQueueFunction
                 });
 
             _logger.LogWarning(
-                "CostByResourceQueue 429 | sub={subscriptionId} retry={retry} delay={delay}min",
+                "CostByResourceQueue reagendada | sub={subscriptionId} reason={reason} retry={retry} delay={delay}min",
                 payload.SubscriptionId,
+                ex is CostDataNotAvailableException ? "no-data" : "429",
                 nextRetry,
                 delayMinutes);
         }
@@ -154,6 +183,12 @@ public class CostByResourceQueueFunction
         return ex.Message.Contains("429", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool IsRetryableCostFailure(Exception ex)
+    {
+        return ex is CostDataNotAvailableException ||
+               ex is HttpRequestException httpException && IsTooManyRequests(httpException);
+    }
+
     private static bool MatchesServiceFilter(string candidate, string? requested)
     {
         if (string.IsNullOrWhiteSpace(requested))
@@ -186,4 +221,6 @@ public class CostByResourceQueueFunction
         public string? Service { get; set; }
         public int RetryCount { get; set; }
     }
+
+    private sealed class CostDataNotAvailableException(string message) : Exception(message);
 }

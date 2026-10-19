@@ -95,7 +95,7 @@ public class CostAnalysisTimerFunction
                         _logger.LogInformation(" [HÍBRIDO] Enviando análise completa para SERVICE BUS QUEUES");
                         
                     //  PRODUÇÃO: Subscription específica vai para fila dedicada
-                    var productionSubscriptionId = "504a622c-3995-46c5-8ba7-8edb365ed17b";
+                    var productionSubscriptionId = "00000000-0000-0000-0000-00000000a004";
                     
                     if (subscriptionId.Equals(productionSubscriptionId, StringComparison.OrdinalIgnoreCase))
                     {
@@ -192,7 +192,7 @@ public class CostAnalysisTimerFunction
         
         //  2. Fallback para subscription única
         var subscriptionId = _configuration["AZURE_SUBSCRIPTION_ID"] ?? 
-                            "0ce85ffc-37b5-4729-9a86-c7db4f958628"; // Usar a subscription que está funcionando
+                            "00000000-0000-0000-0000-00000000a002"; // Usar a subscription que está funcionando
         
         _logger.LogInformation(" Usando subscription única: {subscriptionId}", subscriptionId);
         return new List<string> { subscriptionId };

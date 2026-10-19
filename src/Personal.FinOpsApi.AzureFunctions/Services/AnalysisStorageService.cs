@@ -11,7 +11,7 @@ namespace Personal.FinOpsApi.AzureFunctions.Services;
 ///  FASE B - Padronização completa para Blob Storage
 /// Padrão único: year=YYYY/month=MM/day=DD/XXXX/arquivo.json
 /// </summary>
-public class AnalysisStorageService
+public class AnalysisStorageService : IAnalysisSnapshotService
 {
     private readonly BlobContainerClient _container;
     private readonly ILogger<AnalysisStorageService> _logger;
@@ -73,25 +73,30 @@ public class AnalysisStorageService
 
             //  DIFERENCIAL: Extrair apenas recommendations + summary limpo
             var cleanResult = ExtractRecommendationsOnly(analysisResult);
-            var newRecommendationCount = GetRecommendationCount(cleanResult);
+            var json = JsonSerializer.Serialize(cleanResult, _jsonOptions);
+            var newQuality = EvaluateRecommendationPayload(json);
 
-            // Proteção: não sobrescrever arquivo existente com payload vazio.
-            if (newRecommendationCount == 0 && await blobClient.ExistsAsync())
+            // Proteção: falhas transitórias das duas fontes financeiras não podem
+            // substituir recomendações que ainda possuem custos observados válidos.
+            if (await blobClient.ExistsAsync())
             {
-                var existingCount = await GetExistingRecommendationCountAsync(blobClient);
-                if (existingCount > 0)
+                var existingJson = await GetExistingRecommendationPayloadAsync(blobClient);
+                var existingQuality = EvaluateRecommendationPayload(existingJson);
+                if (ShouldPreserveExistingPayload(existingQuality, newQuality))
                 {
                     _logger.LogWarning(
-                        " Evitando sobrescrever recommendations.json com vazio para {subscriptionId}. Existente={existingCount}, novo={newCount}",
+                        " Evitando regressão de recommendations.json para {subscriptionId}. Existente={existingCount}/{existingCosts} custos válidos; novo={newCount}/{newCosts} custos válidos; indisponíveis={unavailable}",
                         normalizedSubscriptionId,
-                        existingCount,
-                        newRecommendationCount);
+                        existingQuality.RecommendationCount,
+                        existingQuality.AvailableCostCount,
+                        newQuality.RecommendationCount,
+                        newQuality.AvailableCostCount,
+                        newQuality.UnavailableCostCount);
                     return;
                 }
             }
 
             // Serializar com encoding UTF-8 e caracteres especiais
-            var json = JsonSerializer.Serialize(cleanResult, _jsonOptions);
             using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json));
 
             await blobClient.UploadAsync(stream, overwrite: true);
@@ -554,41 +559,96 @@ public class AnalysisStorageService
         return 0;
     }
 
-    private async Task<int> GetExistingRecommendationCountAsync(BlobClient blobClient)
+    internal readonly record struct RecommendationPayloadQuality(
+        int RecommendationCount,
+        int AvailableCostCount,
+        int UnavailableCostCount);
+
+    internal static RecommendationPayloadQuality EvaluateRecommendationPayload(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return default;
+        }
+
+        using var document = JsonDocument.Parse(json);
+        var recommendations = document.RootElement.ValueKind == JsonValueKind.Array
+            ? document.RootElement
+            : TryGetPropertyIgnoreCase(document.RootElement, "recommendations", out var value)
+                ? value
+                : default;
+        if (recommendations.ValueKind != JsonValueKind.Array)
+        {
+            return default;
+        }
+
+        var availableCosts = 0;
+        var unavailableCosts = 0;
+        foreach (var recommendation in recommendations.EnumerateArray())
+        {
+            var unavailable = TryGetPropertyIgnoreCase(recommendation, "costProvenance", out var provenance)
+                && TryGetPropertyIgnoreCase(provenance, "source", out var source)
+                && string.Equals(source.GetString(), "Unavailable", StringComparison.OrdinalIgnoreCase);
+            if (unavailable)
+            {
+                unavailableCosts++;
+                continue;
+            }
+
+            var hasObservedCost = TryGetPropertyIgnoreCase(recommendation, "observedCost", out var observedCost)
+                && observedCost.ValueKind == JsonValueKind.Number;
+            var hasProjectedCost = TryGetPropertyIgnoreCase(recommendation, "estimatedMonthlyCost", out var projectedCost)
+                && projectedCost.ValueKind == JsonValueKind.Number
+                && projectedCost.TryGetDecimal(out var projected)
+                && projected > 0;
+            if (hasObservedCost || hasProjectedCost)
+            {
+                availableCosts++;
+            }
+        }
+
+        return new RecommendationPayloadQuality(
+            recommendations.GetArrayLength(),
+            availableCosts,
+            unavailableCosts);
+    }
+
+    internal static bool ShouldPreserveExistingPayload(
+        RecommendationPayloadQuality existing,
+        RecommendationPayloadQuality candidate)
+        => (candidate.RecommendationCount == 0 && existing.RecommendationCount > 0)
+            || (candidate.UnavailableCostCount > 0
+                && existing.AvailableCostCount > candidate.AvailableCostCount);
+
+    private static bool TryGetPropertyIgnoreCase(JsonElement element, string name, out JsonElement value)
+    {
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var property in element.EnumerateObject())
+            {
+                if (property.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+                {
+                    value = property.Value;
+                    return true;
+                }
+            }
+        }
+
+        value = default;
+        return false;
+    }
+
+    private async Task<string?> GetExistingRecommendationPayloadAsync(BlobClient blobClient)
     {
         try
         {
             var response = await blobClient.DownloadContentAsync();
-            var json = response.Value.Content.ToString();
-            if (string.IsNullOrWhiteSpace(json))
-            {
-                return 0;
-            }
-
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.ValueKind == JsonValueKind.Array)
-            {
-                return doc.RootElement.GetArrayLength();
-            }
-
-            if (doc.RootElement.TryGetProperty("recommendations", out var recommendationsElement) &&
-                recommendationsElement.ValueKind == JsonValueKind.Array)
-            {
-                return recommendationsElement.GetArrayLength();
-            }
-
-            if (doc.RootElement.TryGetProperty("Recommendations", out var recommendationsPascalElement) &&
-                recommendationsPascalElement.ValueKind == JsonValueKind.Array)
-            {
-                return recommendationsPascalElement.GetArrayLength();
-            }
-
-            return 0;
+            return response.Value.Content.ToString();
         }
         catch (Exception ex)
         {
             _logger.LogWarning(" Erro ao ler recommendations existente para proteção de overwrite: {error}", ex.Message);
-            return 0;
+            return null;
         }
     }
 

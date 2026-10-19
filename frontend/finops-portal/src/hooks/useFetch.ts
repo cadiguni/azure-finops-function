@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 interface UseFetchResult<T> {
   data: T | null;
@@ -11,17 +11,25 @@ export function useFetch<T>(fetcher: () => Promise<T>, deps: unknown[] = []): Us
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const latestRequest = useRef(0);
 
   const execute = useCallback(async () => {
+    const requestId = ++latestRequest.current;
     setLoading(true);
     setError(null);
     try {
       const result = await fetcher();
-      setData(result);
+      if (requestId === latestRequest.current) {
+        setData(result);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erro desconhecido');
+      if (requestId === latestRequest.current) {
+        setError(err instanceof Error ? err.message : 'Erro desconhecido');
+      }
     } finally {
-      setLoading(false);
+      if (requestId === latestRequest.current) {
+        setLoading(false);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);

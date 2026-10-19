@@ -1,7 +1,7 @@
 # Log Analytics Workspace - FinOps Platform
 
 resource "azurerm_log_analytics_workspace" "finops_loganalytics" {
-  name                = "${local.aplicacao}-${local.setor}-law"
+  name                = "${local.nome_base}-law"
   location            = local.localizacao
   resource_group_name = azurerm_resource_group.rg.name
   tags                = local.tags

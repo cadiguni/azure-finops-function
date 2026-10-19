@@ -1,55 +1,35 @@
-trigger: none
+trigger:
+  branches:
+    include:
+      - main
+      - homolog
+  paths:
+    include:
+      - src/**
+
+resources:
+  repositories:
+    - repository: DEVOPS
+      type: git
+      name: NAP/_git/DevOps
+      # backend/v4.7.0: publishProjects no build e limpeza do artefato antes do download no deploy.
+      ref: 'refs/tags/backend/v4.7.0'
 
 variables:
   - template: config.yml
-  - group: FinOps-func-Portfolio
+  - group: FinOps-${{ variables.Ambiente }}-Personal
 
 pool: self-hosted-agent-pool
 
 stages:
-  - stage: 'Build_function'
-    displayName: 'Build function'
-    jobs:
-    - job: 'Build'
-      displayName: 'Build'
-
-      steps:
-      - task: NuGetToolInstaller@1
-        displayName: 'Instalar Nuget'
-
-      - task: DotNetCoreCLI@2
-        displayName: Restore
-        inputs:
-          command: restore
-          feedsToUse: 'select'
-          vstsFeed: 'Feed_NAP'
-          includeNuGetOrg: true
-          projects: |
-            src/Personal.FinOpsApi.AzureFunctions/Personal.FinOpsApi.AzureFunctions.csproj
-
-      - task: DotNetCoreCLI@2
-        displayName: Build
-        inputs:
-          arguments: '--configuration Release'
-          feedsToUse: 'select'
-          vstsFeed: 'Feed_NAP'
-          includeNuGetOrg: true
-          projects: |
-            src/Personal.FinOpsApi.AzureFunctions/Personal.FinOpsApi.AzureFunctions.csproj
-
-      - task: DotNetCoreCLI@2
-        displayName: Publish
-        inputs:
-          command: publish
-          publishWebProjects: false
-          modifyOutputPath: true
-          arguments: ' src/Personal.FinOpsApi.AzureFunctions/Personal.FinOpsApi.AzureFunctions.csproj --configuration Release --output $(build.artifactstagingdirectory)/${{ variables.ArtifactName }}'
-          zipAfterPublish: True
-
-      - script: |
-            echo "build.artifactstagingdirectory: $(build.artifactstagingdirectory)/${{ variables.ArtifactName }}"
-        displayName: 'debug variables'
-
-      - publish: $(Build.ArtifactStagingDirectory)/${{ variables.ArtifactName }}
-        artifact: '${{ variables.ArtifactName }}'
-        condition: succeeded()
+  - template: templates/backend/build-backend-dotnet.yml@DEVOPS
+    parameters:
+      # Nome do artefato consumido pelo deploy-function.yml (ArtifactName no config.yml).
+      name: '${{ variables.ArtifactName }}'
+      gitversion: '5.10.1'
+      vstsFeed: 'Feed_NAP'
+      buildConfiguration: 'Release'
+      # Só a Function: a solução também tem o projeto de testes, que não pode ir no artefato.
+      pathproj: 'src/Personal.FinOpsApi.AzureFunctions/Personal.FinOpsApi.AzureFunctions.csproj'
+      publishWebProjectsDeploy: false
+      publishProjects: 'src/Personal.FinOpsApi.AzureFunctions/Personal.FinOpsApi.AzureFunctions.csproj'

@@ -1,7 +1,7 @@
 import { useMsal } from '@azure/msal-react';
 import { LogOut } from 'lucide-react';
 
-export default function UserProfile() {
+export default function UserProfile({ collapsed = false }: { collapsed?: boolean }) {
   const { instance } = useMsal();
   const account = instance.getActiveAccount();
 
@@ -15,6 +15,16 @@ export default function UserProfile() {
       console.error('Logout failed:', error);
     });
   };
+
+  if (collapsed) {
+    return (
+      <div className="user-profile user-profile--collapsed">
+        <button className="user-logout" onClick={handleLogout} title={displayName}>
+          <LogOut size={16} />
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="user-profile">

@@ -1,4 +1,5 @@
 using Azure.Messaging.ServiceBus;
+using Personal.FinOpsApi.AzureFunctions.Models;
 using Personal.FinOpsApi.AzureFunctions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Configuration;
@@ -31,6 +32,14 @@ public class CostByResourceQueueStarterFunction
         [ServiceBusTrigger("%QUEUE_COST_BY_RESOURCE_STARTER%", Connection = "ServiceBusConnection")]
         ServiceBusReceivedMessage message)
     {
+        if (!CostCollectionRouting.IsLegacyByResourceEnabled(_configuration))
+        {
+            _logger.LogInformation(
+                "Starter legado por recurso ignorado: source={source} reason=disabled",
+                CostDataSources.CostManagementQueryApi);
+            return;
+        }
+
         var payload = ParsePayload(message.Body.ToString());
         if (payload == null)
         {
@@ -41,14 +50,19 @@ public class CostByResourceQueueStarterFunction
         var targetDate = payload.Date;
         var service = NormalizeServiceFilter(payload.Service);
         var subscriptionFilter = payload.SubscriptionFilter ?? "all";
-        var subscriptions = await ResolveSubscriptionsAsync(subscriptionFilter);
+        var resolvedSubscriptions = await ResolveSubscriptionsAsync(subscriptionFilter);
+        var subscriptions = CostCollectionRouting.FilterLegacySubscriptions(
+            _configuration,
+            resolvedSubscriptions);
 
         var (enqueued, failed) = await _queueService.SendBulkCostByResourceAnalysisAsync(subscriptions, targetDate, service);
 
         _logger.LogInformation(
-            "CostByResourceQueueStarter concluída | date={date} subs={subs} enqueued={enqueued} failed={failed}",
+            "CostByResourceQueueStarter concluída | source={source} date={date} subs={subs} excludedExportSubscriptions={excludedCount} enqueued={enqueued} failed={failed}",
+            CostDataSources.CostManagementQueryApi,
             targetDate.ToString("yyyy-MM-dd"),
             subscriptions.Count,
+            resolvedSubscriptions.Count - subscriptions.Count,
             enqueued,
             failed);
     }

@@ -1,5 +1,6 @@
 using Personal.FinOpsApi.AzureFunctions.Models;
 using Microsoft.Extensions.Logging;
+using System.Globalization;
 
 namespace Personal.FinOpsApi.AzureFunctions.Services;
 
@@ -10,14 +11,16 @@ namespace Personal.FinOpsApi.AzureFunctions.Services;
 ///   Medium: +30% | High: +60% | Critical: +100%
 ///   Filtro: diferença absoluta >= R$ 10 (evitar falso positivo)
 /// 
-/// Regra 2 — Custo acima da meta diária (budget mensal / 30)
+/// Regra 2 — Custo acima da meta diária (budget do ciclo / dias do ciclo)
 ///   Medium: acima da meta | High: +25% acima | Critical: +50% acima
 /// 
-/// Regra 3 — Projeção mensal acima do budget
-///   Projeção = custo médio diário atual × 30
+/// Regra 3 — Projeção até a virada do ciclo acima do budget
+///   Projeção = custo acumulado no ciclo + média diária do ciclo × dias restantes
 /// </summary>
 public class CostAnomalyAnalysisService
 {
+    private const decimal MinimumCostForMeaningfulPercent = 1.0m;
+
     private readonly ILogger<CostAnomalyAnalysisService> _logger;
 
     public CostAnomalyAnalysisService(ILogger<CostAnomalyAnalysisService> logger)
@@ -32,94 +35,202 @@ public class CostAnomalyAnalysisService
         string subscriptionId,
         string subscriptionName,
         List<DailyCostEntry> dailyCosts,
-        CostAnomalyConfig config)
+        DateTime requestedDate,
+        CostAnomalyConfig config,
+        SubscriptionBillingCycleWindow? billingCycleWindow = null)
     {
-        var today = DateTime.UtcNow.Date.ToString("yyyy-MM-dd");
+        var requestedDateText = requestedDate.ToString("yyyy-MM-dd");
 
         var anomaly = new SubscriptionCostAnomaly
         {
             SubscriptionId = subscriptionId,
             SubscriptionName = subscriptionName,
-            DailyCosts = dailyCosts
+            RequestedDate = requestedDateText,
+            DailyCosts = dailyCosts,
+            CostSource = ResolveCostSource(dailyCosts),
+            CostUsedFallback = dailyCosts.Any(entry => entry.UsedFallback),
+            CostFallbackReason = dailyCosts
+                .Select(entry => entry.FallbackReason)
+                .FirstOrDefault(reason => !string.IsNullOrWhiteSpace(reason)),
+            CostDataAsOf = dailyCosts
+                .Select(entry => entry.Date)
+                .OrderByDescending(date => date, StringComparer.Ordinal)
+                .FirstOrDefault() ?? string.Empty
         };
 
-        // Custo de hoje
-        var todayEntry = dailyCosts.FirstOrDefault(d => d.Date == today);
-        anomaly.TodayCost = todayEntry?.TotalCost ?? 0;
+        if (dailyCosts.Count == 0)
+        {
+            anomaly.DataStatus = CostAnomalyDataStatus.NoCostData;
+            anomaly.Reasons.Add("Nenhum custo diário disponível na janela consultada.");
+            _logger.LogInformation("[COST-ANOMALY] Sem dados de custo para {subscriptionName} ({subscriptionId})", subscriptionName, subscriptionId);
+            return anomaly;
+        }
 
-        // Média dos últimos N dias (excluindo hoje)
-        var baselineCosts = dailyCosts
-            .Where(d => d.Date != today)
-            .OrderByDescending(d => d.Date)
-            .Take(config.BaselineDays)
+        var costsByDate = dailyCosts
+            .Select(d => new
+            {
+                Entry = d,
+                ParsedDate = DateTime.TryParseExact(d.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed)
+                    ? parsed.Date
+                    : DateTime.MinValue
+            })
+            .Where(x => x.ParsedDate != DateTime.MinValue)
+            .GroupBy(x => x.ParsedDate)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.Entry.TotalCost).First().Entry);
+
+        var candidateDates = costsByDate.Keys
+            .Where(d => d <= requestedDate.Date)
             .ToList();
 
-        anomaly.AverageLast3Days = baselineCosts.Count > 0
-            ? baselineCosts.Average(d => d.TotalCost)
-            : 0;
+        if (config.IgnoreCurrentDay)
+        {
+            var currentUtcDate = DateTime.UtcNow.Date;
+            candidateDates = candidateDates.Where(d => d != currentUtcDate).ToList();
+        }
 
-        // Variação contra histórico
-        anomaly.IncreaseAmount = anomaly.TodayCost - anomaly.AverageLast3Days;
-        anomaly.IncreasePercent = anomaly.AverageLast3Days > 0
-            ? (anomaly.IncreaseAmount / anomaly.AverageLast3Days) * 100
-            : 0;
+        if (candidateDates.Count == 0)
+        {
+            anomaly.DataStatus = CostAnomalyDataStatus.NoCostData;
+            anomaly.Reasons.Add("Nenhum custo diário consolidado disponível para análise.");
+            _logger.LogInformation(
+                "[COST-ANOMALY] Sem data consolidada para {subscriptionName} ({subscriptionId})",
+                subscriptionName, subscriptionId);
+            return anomaly;
+        }
 
-        // Projeção mensal (baseada na média incluindo hoje)
-        var allCosts = dailyCosts.Where(d => d.TotalCost > 0).ToList();
-        var avgDaily = allCosts.Count > 0 ? allCosts.Average(d => d.TotalCost) : 0;
-        anomaly.MonthlyProjection = avgDaily * 30;
+        var analysisDate = candidateDates.Max();
+        var analysisDateText = analysisDate.ToString("yyyy-MM-dd");
+
+        anomaly.DataStatus = CostAnomalyDataStatus.Consolidated;
+        anomaly.AnalysisDate = analysisDateText;
+        anomaly.LatestDailyCost = costsByDate[analysisDate].TotalCost;
+
+        var currentCycleSource = BillingPeriodSources.DefaultCalendarMonth;
+        var currentCycleConfidence = BillingPeriodConfidence.Low;
+        var currentCycleNote = "Billing period oficial não encontrado; usando mês calendário.";
+        var currentCycleStart = new DateTime(analysisDate.Year, analysisDate.Month, 1);
+        var currentCycleTurn = currentCycleStart.AddMonths(1);
+        if (billingCycleWindow is not null &&
+            billingCycleWindow.CycleStartDate.Date <= analysisDate &&
+            analysisDate < billingCycleWindow.CycleTurnDate.Date)
+        {
+            currentCycleStart = billingCycleWindow.CycleStartDate.Date;
+            currentCycleTurn = billingCycleWindow.CycleTurnDate.Date;
+            currentCycleSource = billingCycleWindow.Source;
+            currentCycleConfidence = billingCycleWindow.Confidence;
+            currentCycleNote = billingCycleWindow.Note;
+        }
+
+        var currentCycleElapsedDays = Math.Max(1, (analysisDate - currentCycleStart).Days + 1);
+        var currentCycleRemainingDays = Math.Max(0, (currentCycleTurn - analysisDate).Days);
+        var currentCycleLengthDays = Math.Max(1, (currentCycleTurn - currentCycleStart).Days);
+        var currentCycleCost = costsByDate
+            .Where(kvp => kvp.Key >= currentCycleStart && kvp.Key <= analysisDate)
+            .Sum(kvp => kvp.Value.TotalCost);
+        var currentCycleDailyAverage = currentCycleCost / currentCycleElapsedDays;
+        var currentCycleDailyBudget = config.MonthlyBudget / currentCycleLengthDays;
+
+        anomaly.CurrentCycleCost = currentCycleCost;
+        anomaly.CurrentCycleStartDate = currentCycleStart.ToString("yyyy-MM-dd");
+        anomaly.CurrentCycleTurnDate = currentCycleTurn.ToString("yyyy-MM-dd");
+        anomaly.CurrentCycleElapsedDays = currentCycleElapsedDays;
+        anomaly.CurrentCycleRemainingDays = currentCycleRemainingDays;
+        anomaly.CurrentCycleDailyAverage = currentCycleDailyAverage;
+        anomaly.CurrentCycleSource = currentCycleSource;
+        anomaly.CurrentCycleConfidence = currentCycleConfidence;
+        anomaly.CurrentCycleNote = currentCycleNote;
+        anomaly.MonthlyProjection = currentCycleCost + (currentCycleDailyAverage * currentCycleRemainingDays);
         anomaly.ProjectedOverBudget = anomaly.MonthlyProjection - config.MonthlyBudget;
+
+        var baselineStart = analysisDate.AddDays(-config.BaselineDays);
+        var baselineEnd = analysisDate.AddDays(-1);
+        anomaly.BaselineStartDate = baselineStart.ToString("yyyy-MM-dd");
+        anomaly.BaselineEndDate = baselineEnd.ToString("yyyy-MM-dd");
+
+        var baselineEntries = new List<DailyCostEntry>();
+        for (var day = baselineStart; day <= baselineEnd; day = day.AddDays(1))
+        {
+            if (costsByDate.TryGetValue(day, out var entry))
+            {
+                baselineEntries.Add(entry);
+            }
+        }
+
+        if (baselineEntries.Count < config.BaselineDays)
+        {
+            anomaly.DataStatus = CostAnomalyDataStatus.InsufficientData;
+            anomaly.Reasons.Add(
+                $"Histórico insuficiente: encontrados {baselineEntries.Count} de {config.BaselineDays} dia(s) no baseline ({anomaly.BaselineStartDate} a {anomaly.BaselineEndDate}).");
+            _logger.LogInformation(
+                "[COST-ANOMALY] Dados insuficientes para {subscriptionName} ({subscriptionId}): baseline {found}/{required}",
+                subscriptionName, subscriptionId, baselineEntries.Count, config.BaselineDays);
+            return anomaly;
+        }
+
+        anomaly.BaselineAverage = baselineEntries.Average(d => d.TotalCost);
+        anomaly.IncreaseAmount = anomaly.LatestDailyCost - anomaly.BaselineAverage;
+        anomaly.IncreasePercent = CalculateIncreasePercent(anomaly.LatestDailyCost, anomaly.BaselineAverage, anomaly.IncreaseAmount);
+
+        if (anomaly.IncreaseAmount < config.MinimumIncreaseAmount)
+        {
+            anomaly.Severity = "None";
+            anomaly.HasAnomaly = false;
+            _logger.LogInformation(
+                "[COST-ANOMALY] Sem alerta para {subscriptionName}: aumento absoluto R$ {increase:F2} abaixo do mínimo R$ {min:F2}",
+                subscriptionName, anomaly.IncreaseAmount, config.MinimumIncreaseAmount);
+            return anomaly;
+        }
 
         // --- Aplicar Regras ---
         var severity = "None";
 
         // Regra 1: Variação contra histórico recente
-        if (anomaly.IncreasePercent >= config.MediumPercent && anomaly.IncreaseAmount >= config.MinimumIncreaseAmount)
+        if (anomaly.BaselineAverage > 0 && anomaly.IncreasePercent >= config.MediumPercent)
         {
             if (anomaly.IncreasePercent >= config.CriticalPercent)
             {
                 severity = "Critical";
-                anomaly.Reasons.Add($"Custo diário {anomaly.IncreasePercent:F0}% acima da média dos últimos {config.BaselineDays} dias (R$ {anomaly.AverageLast3Days:F2} → R$ {anomaly.TodayCost:F2})");
+                anomaly.Reasons.Add($"Último custo diário disponível está {anomaly.IncreasePercent:F0}% acima da média dos {config.BaselineDays} dias anteriores.");
             }
             else if (anomaly.IncreasePercent >= config.HighPercent)
             {
                 severity = "High";
-                anomaly.Reasons.Add($"Custo diário {anomaly.IncreasePercent:F0}% acima da média dos últimos {config.BaselineDays} dias (R$ {anomaly.AverageLast3Days:F2} → R$ {anomaly.TodayCost:F2})");
+                anomaly.Reasons.Add($"Último custo diário disponível está {anomaly.IncreasePercent:F0}% acima da média dos {config.BaselineDays} dias anteriores.");
             }
             else
             {
                 severity = MaxSeverity(severity, "Medium");
-                anomaly.Reasons.Add($"Custo diário {anomaly.IncreasePercent:F0}% acima da média dos últimos {config.BaselineDays} dias (R$ {anomaly.AverageLast3Days:F2} → R$ {anomaly.TodayCost:F2})");
+                anomaly.Reasons.Add($"Último custo diário disponível está {anomaly.IncreasePercent:F0}% acima da média dos {config.BaselineDays} dias anteriores.");
             }
         }
 
         // Regra 2: Custo acima da meta diária
-        if (anomaly.TodayCost > config.DailyBudget)
+        if (anomaly.LatestDailyCost > currentCycleDailyBudget)
         {
-            var overBudgetPercent = ((anomaly.TodayCost - config.DailyBudget) / config.DailyBudget) * 100;
+            var overBudgetPercent = ((anomaly.LatestDailyCost - currentCycleDailyBudget) / currentCycleDailyBudget) * 100;
 
             if (overBudgetPercent >= 50)
             {
                 severity = MaxSeverity(severity, "Critical");
-                anomaly.Reasons.Add($"Custo diário R$ {anomaly.TodayCost:F2} está {overBudgetPercent:F0}% acima da meta diária de R$ {config.DailyBudget:F2}");
+                anomaly.Reasons.Add($"Último custo diário disponível está {overBudgetPercent:F0}% acima da meta diária do ciclo de R$ {currentCycleDailyBudget:F2}.");
             }
             else if (overBudgetPercent >= 25)
             {
                 severity = MaxSeverity(severity, "High");
-                anomaly.Reasons.Add($"Custo diário R$ {anomaly.TodayCost:F2} está {overBudgetPercent:F0}% acima da meta diária de R$ {config.DailyBudget:F2}");
+                anomaly.Reasons.Add($"Último custo diário disponível está {overBudgetPercent:F0}% acima da meta diária do ciclo de R$ {currentCycleDailyBudget:F2}.");
             }
             else
             {
                 severity = MaxSeverity(severity, "Medium");
-                anomaly.Reasons.Add($"Custo diário R$ {anomaly.TodayCost:F2} acima da meta diária de R$ {config.DailyBudget:F2}");
+                anomaly.Reasons.Add($"Último custo diário disponível está acima da meta diária do ciclo de R$ {currentCycleDailyBudget:F2}.");
             }
         }
 
-        // Regra 3: Projeção mensal acima do budget
+        // Regra 3: Projeção até a virada do ciclo acima do budget
         if (anomaly.ProjectedOverBudget > 0)
         {
             severity = MaxSeverity(severity, "Medium");
-            anomaly.Reasons.Add($"Projeção mensal de R$ {anomaly.MonthlyProjection:F2} ultrapassa o budget de R$ {config.MonthlyBudget:F2} em R$ {anomaly.ProjectedOverBudget:F2}");
+            anomaly.Reasons.Add($"Projeção até {anomaly.CurrentCycleTurnDate} de R$ {anomaly.MonthlyProjection:F2} ultrapassa o budget de R$ {config.MonthlyBudget:F2} em R$ {anomaly.ProjectedOverBudget:F2}");
         }
 
         anomaly.Severity = severity;
@@ -128,15 +239,15 @@ public class CostAnomalyAnalysisService
         if (anomaly.HasAnomaly)
         {
             _logger.LogWarning(
-                "[COST-ANOMALY] {severity} para {subscriptionName} ({subscriptionId}): Hoje=R$ {todayCost:F2}, Média=R$ {avg:F2}, Projeção=R$ {projection:F2}",
+                "[COST-ANOMALY] {severity} para {subscriptionName} ({subscriptionId}): analysisDate={analysisDate}, latestDailyCost=R$ {latestDailyCost:F2}, baselineAverage=R$ {baselineAverage:F2}",
                 severity, subscriptionName, subscriptionId,
-                anomaly.TodayCost, anomaly.AverageLast3Days, anomaly.MonthlyProjection);
+                anomaly.AnalysisDate, anomaly.LatestDailyCost, anomaly.BaselineAverage);
         }
         else
         {
             _logger.LogInformation(
-                "[COST-ANOMALY] OK para {subscriptionName}: Hoje=R$ {todayCost:F2}, Média=R$ {avg:F2}",
-                subscriptionName, anomaly.TodayCost, anomaly.AverageLast3Days);
+                "[COST-ANOMALY] OK para {subscriptionName}: analysisDate={analysisDate}, latestDailyCost=R$ {latestDailyCost:F2}, baselineAverage=R$ {baselineAverage:F2}, status={status}",
+                subscriptionName, anomaly.AnalysisDate, anomaly.LatestDailyCost, anomaly.BaselineAverage, anomaly.DataStatus);
         }
 
         return anomaly;
@@ -156,5 +267,33 @@ public class CostAnomalyAnalysisService
         var candidateLevel = order.GetValueOrDefault(candidate, 0);
 
         return candidateLevel > currentLevel ? candidate : current;
+    }
+
+    private static decimal CalculateIncreasePercent(decimal latestDailyCost, decimal baselineAverage, decimal increaseAmount)
+    {
+        // Evita percentuais explosivos em subscriptions com custo em centavos.
+        if (latestDailyCost < MinimumCostForMeaningfulPercent && baselineAverage < MinimumCostForMeaningfulPercent)
+        {
+            return 0m;
+        }
+
+        return baselineAverage > 0
+            ? (increaseAmount / baselineAverage) * 100
+            : 0m;
+    }
+
+    private static string ResolveCostSource(IEnumerable<DailyCostEntry> dailyCosts)
+    {
+        var sources = dailyCosts
+            .Select(entry => entry.Source)
+            .Where(source => !string.IsNullOrWhiteSpace(source))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return sources.Count switch
+        {
+            0 => CostDataSources.CostManagementQueryApi,
+            1 => sources[0],
+            _ => "Mixed"
+        };
     }
 }

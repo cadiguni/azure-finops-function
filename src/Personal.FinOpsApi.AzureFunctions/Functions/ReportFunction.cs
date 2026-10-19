@@ -12,12 +12,15 @@ namespace Personal.FinOpsApi.AzureFunctions.Functions;
 /// </summary>
 public class ReportFunction
 {
+    private const int PreGeneratedReportFallbackDays = 7;
+
     private readonly IRecommendationReportService _reportService;
     private readonly HtmlReportBuilder _htmlBuilder;
     private readonly CsvReportBuilder _csvBuilder;
     private readonly TeamSubscriptionsService _teamService;
-    private readonly CostAnomalyStorageService _anomalyStorageService;
     private readonly PreGeneratedReportStorageService _preGeneratedReportStorageService;
+    private readonly CurrentUserService _currentUserService;
+    private readonly AuthorizationService _authorizationService;
     private readonly IConfiguration _configuration;
     private readonly ILogger<ReportFunction> _logger;
 
@@ -26,8 +29,9 @@ public class ReportFunction
         HtmlReportBuilder htmlBuilder,
         CsvReportBuilder csvBuilder,
         TeamSubscriptionsService teamService,
-        CostAnomalyStorageService anomalyStorageService,
         PreGeneratedReportStorageService preGeneratedReportStorageService,
+        CurrentUserService currentUserService,
+        AuthorizationService authorizationService,
         IConfiguration configuration,
         ILogger<ReportFunction> logger)
     {
@@ -35,8 +39,9 @@ public class ReportFunction
         _htmlBuilder = htmlBuilder;
         _csvBuilder = csvBuilder;
         _teamService = teamService;
-        _anomalyStorageService = anomalyStorageService;
         _preGeneratedReportStorageService = preGeneratedReportStorageService;
+        _currentUserService = currentUserService;
+        _authorizationService = authorizationService;
         _configuration = configuration;
         _logger = logger;
     }
@@ -49,53 +54,57 @@ public class ReportFunction
     public async Task<HttpResponseData> GenerateHtmlReportAsync(
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "report/html")] HttpRequestData req)
     {
-        _logger.LogInformation("🎨 Solicitação de relatório HTML pré-gerado recebida");
+        var user = await _currentUserService.GetCurrentUserAsync(req);
+        if (!user.IsAuthenticated)
+        {
+            return await ApiHttpResponses.Unauthorized(req);
+        }
+
+        if (!_authorizationService.CanRead(user))
+        {
+            return await ApiHttpResponses.Forbidden(req, "Usuário sem permissão de leitura.");
+        }
+
+        _logger.LogInformation("🎨 Solicitação de relatório HTML versionado recebida");
 
         try
         {
             var (date, mgFilter, subFilter, teamFilter) = ParseQueryParams(req);
 
-            if (!string.IsNullOrEmpty(mgFilter))
-            {
-                var badResponse = req.CreateResponse(HttpStatusCode.BadRequest);
-                await badResponse.WriteStringAsync(
-                    "Relatórios HTML pré-gerados não suportam filtro managementGroup. Use filtros por subscription, team ou relatório geral.");
-                return badResponse;
-            }
-
-            var blobPath = ResolvePreGeneratedHtmlPath(date, subFilter, teamFilter);
-            var htmlContent = await _preGeneratedReportStorageService.LoadHtmlAsync(blobPath);
-
-            if (htmlContent == null)
-            {
-                var notFoundResponse = req.CreateResponse(HttpStatusCode.NotFound);
-                notFoundResponse.Headers.Add("Content-Type", "text/html; charset=utf-8");
-                await notFoundResponse.WriteStringAsync(
-                    $"<html><body><h1>Relatório não encontrado</h1><p>Arquivo pré-gerado não existe: {WebUtility.HtmlEncode(blobPath)}</p></body></html>");
-                return notFoundResponse;
-            }
-
+            var reportData = !string.IsNullOrEmpty(teamFilter)
+                ? await _reportService.GenerateReportByTeamAsync(date, teamFilter)
+                : await _reportService.GenerateReportAsync(date, mgFilter, subFilter);
+            var resolvedDate = reportData.AnalysisDate;
+            var htmlContent = _htmlBuilder.BuildReport(reportData, teamFilter);
             var response = req.CreateResponse(HttpStatusCode.OK);
             response.Headers.Add("Content-Type", "text/html; charset=utf-8");
             response.Headers.Add("Content-Disposition", 
-                $"inline; filename=\"finops-report-{date:yyyy-MM-dd}.html\"");
+                $"inline; filename=\"finops-report-{resolvedDate:yyyy-MM-dd}.html\"");
+            response.Headers.Add("X-FinOps-Snapshot-Revision", reportData.SnapshotRevision ?? "legacy");
+            response.Headers.Add("X-FinOps-Requested-Date", date.ToString("yyyy-MM-dd"));
+            response.Headers.Add("X-FinOps-Resolved-Date", resolvedDate.ToString("yyyy-MM-dd"));
 
             await response.WriteStringAsync(htmlContent);
 
-            _logger.LogInformation("✅ Relatório HTML pré-gerado retornado: {path}, {htmlSize} bytes", 
-                blobPath, htmlContent.Length);
+            _logger.LogInformation("✅ Relatório HTML versionado retornado: revision={revision}, {htmlSize} bytes",
+                reportData.SnapshotRevision, htmlContent.Length);
 
             return response;
+        }
+        catch (FileNotFoundException ex)
+        {
+            return await ApiHttpResponses.NotFound(req, ex.Message);
+        }
+        catch (Exception ex) when (ex is ArgumentException or FormatException)
+        {
+            var bad = req.CreateResponse(HttpStatusCode.BadRequest);
+            await bad.WriteAsJsonAsync(new { error = "BadRequest", message = ex.Message });
+            return bad;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "❌ Erro ao gerar relatório HTML");
-            
-            var errorResponse = req.CreateResponse(HttpStatusCode.InternalServerError);
-            await errorResponse.WriteStringAsync(
-                $"<html><body><h1>Erro</h1><p>Falha ao gerar relatório: {ex.Message}</p></body></html>");
-            
-            return errorResponse;
+            return await ApiHttpResponses.InternalServerError(req, "Falha ao gerar relatório HTML.");
         }
     }
 
@@ -107,6 +116,17 @@ public class ReportFunction
     public async Task<HttpResponseData> GenerateCsvReportAsync(
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "report/csv")] HttpRequestData req)
     {
+        var user = await _currentUserService.GetCurrentUserAsync(req);
+        if (!user.IsAuthenticated)
+        {
+            return await ApiHttpResponses.Unauthorized(req);
+        }
+
+        if (!_authorizationService.CanRead(user))
+        {
+            return await ApiHttpResponses.Forbidden(req, "Usuário sem permissão de leitura.");
+        }
+
         _logger.LogInformation("📄 Solicitação de relatório CSV recebida");
 
         try
@@ -124,8 +144,11 @@ public class ReportFunction
             var response = req.CreateResponse(HttpStatusCode.OK);
             response.Headers.Add("Content-Type", "text/csv; charset=utf-8");
             response.Headers.Add("Content-Disposition", 
-                $"attachment; filename=\"finops-recommendations-{date:yyyy-MM-dd}.csv\"");
+                $"attachment; filename=\"finops-recommendations-{reportData.AnalysisDate:yyyy-MM-dd}.csv\"");
 
+            response.Headers.Add("X-FinOps-Requested-Date", date.ToString("yyyy-MM-dd"));
+            response.Headers.Add("X-FinOps-Resolved-Date", reportData.AnalysisDate.ToString("yyyy-MM-dd"));
+            response.Headers.Add("X-FinOps-Snapshot-Revision", reportData.SnapshotRevision ?? "legacy");
             await response.WriteStringAsync(csvContent);
 
             _logger.LogInformation("✅ Relatório CSV gerado: {recCount} recomendações, {csvSize} bytes", 
@@ -133,14 +156,20 @@ public class ReportFunction
 
             return response;
         }
+        catch (FileNotFoundException ex)
+        {
+            return await ApiHttpResponses.NotFound(req, ex.Message);
+        }
+        catch (Exception ex) when (ex is ArgumentException or FormatException)
+        {
+            var bad = req.CreateResponse(HttpStatusCode.BadRequest);
+            await bad.WriteAsJsonAsync(new { error = "BadRequest", message = ex.Message });
+            return bad;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "❌ Erro ao gerar relatório CSV");
-            
-            var errorResponse = req.CreateResponse(HttpStatusCode.InternalServerError);
-            await errorResponse.WriteStringAsync($"Error,Message\nGeneration Failed,{ex.Message}");
-            
-            return errorResponse;
+            return await ApiHttpResponses.InternalServerError(req, "Falha ao gerar relatório CSV.");
         }
     }
 
@@ -168,21 +197,9 @@ public class ReportFunction
         _logger.LogInformation("📊 Parâmetros parseados: date={date}, mgFilter={mgFilter}, subFilter={subFilter}, teamFilter={teamFilter}", 
             date.ToString("yyyy-MM-dd"), mgFilter ?? "all", subFilter ?? "all", teamFilter ?? "all");
 
+        if (new[] { mgFilter, subFilter, teamFilter }.Count(f => f != null) > 1)
+            throw new ArgumentException("Selecione apenas um filtro: time ou assinatura.");
         return (date, mgFilter, subFilter, teamFilter);
     }
 
-    private static string ResolvePreGeneratedHtmlPath(DateTime date, string? subFilter, string? teamFilter)
-    {
-        if (!string.IsNullOrEmpty(teamFilter))
-        {
-            return PreGeneratedReportStorageService.BuildTeamPath(date, teamFilter);
-        }
-
-        if (!string.IsNullOrEmpty(subFilter))
-        {
-            return PreGeneratedReportStorageService.BuildSubscriptionPath(date, subFilter);
-        }
-
-        return PreGeneratedReportStorageService.BuildGeneralPath(date);
-    }
 }

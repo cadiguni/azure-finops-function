@@ -1,3 +1,4 @@
+using Personal.FinOpsApi.AzureFunctions.Models;
 using Personal.FinOpsApi.AzureFunctions.Services;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Configuration;
@@ -25,8 +26,23 @@ public class CostByResourceDailyTimerFunction
     public async Task RunAsync([TimerTrigger("%CostByResourceDailySchedule%")]
         TimerInfo timer)
     {
-        var targetDate = DateTime.UtcNow.Date.AddDays(-1);
-        var serviceName = NormalizeServiceFilter(_configuration["COST_RESOURCE_SERVICE"] ?? "Azure App Service");
+        if (!CostCollectionRouting.IsLegacyByResourceEnabled(_configuration))
+        {
+            _logger.LogInformation(
+                "Coleta legada por recurso desabilitada: source={source}",
+                CostDataSources.CostManagementQueryApi);
+            return;
+        }
+
+        var delayDays = Math.Clamp(
+            _configuration.GetValue<int?>("COST_DATA_DELAY_DAYS") ?? 2,
+            1,
+            7);
+        var targetDate = DateTime.UtcNow.Date.AddDays(-delayDays);
+        // A grade de recursos representa toda a assinatura. Filtrar App Service aqui fazia
+        // com que os snapshots novos parecessem incompletos, mesmo quando a assinatura tinha
+        // custo em outros serviços. Um filtro continua possível como configuração explícita.
+        var serviceName = NormalizeServiceFilter(_configuration["COST_RESOURCE_SERVICE"] ?? "all");
 
         if (!_queueService.IsQueueProcessingEnabled)
         {

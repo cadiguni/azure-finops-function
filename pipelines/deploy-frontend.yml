@@ -1,105 +1,50 @@
-trigger:
-  branches:
-    include:
-      - main
-  paths:
-    include:
-      - frontend/**
+trigger: none
+
+resources:
+  pipelines:
+    - pipeline: FinOps-Front-build-portal
+      source: FinOps-Platform\FinOps-Front-build-portal
+      trigger: true
+  repositories:
+    - repository: DEVOPS
+      type: git
+      name: NAP/_git/DevOps
+      # frontend/v4.7.0: cleanStrategy, pruneRetentionDays, contentCacheControl e limpeza do artefato antes do download.
+      ref: 'refs/tags/frontend/v4.7.0'
 
 variables:
   - template: config.yml
-  - group: FinOps-func-Portfolio
-  - name: StorageAccountName
-    value: '$(NomeAplicacao)$(Setor)webstg'
-  - name: ApiBaseUrl
-    value: 'https://$(NomeAplicacao)-$(Setor)-func.azurewebsites.net'
+  - group: FinOps-${{ variables.Ambiente }}-Personal
+  # Variáveis lidas pela validação e pelo upload do template.
+  # prod → finopsplatformnapwebstg (legado), hml → finopsplatformhmlwebstg.
+  - name: NomeStorage
+    value: '${{ variables.NomeAplicacao }}${{ variables.SufixoRecursos }}webstg'
+  - name: frontdoortier
+    value: 'Standard'
+  - name: ComponenteDeDominio
+    value: 'finops'
+  # URL pública do portal; a validação do template exige '-hml.' em hml e proíbe identificadores de ambiente em prod.
+  - name: enderecoDoParcel
+    value: 'https://${{ variables.PortalDomain }}/'
 
 pool: self-hosted-agent-pool
 
 stages:
-  - stage: Build_Frontend
-    displayName: 'Build Frontend'
-    jobs:
-      - job: Build
-        displayName: 'Build React App'
-        steps:
-          - task: UseNode@1
-            displayName: 'Usar Node.js 22.x'
-            inputs:
-              version: '22.x'
-
-          - script: |
-              cd frontend/finops-portal
-              npm ci
-            displayName: 'Instalar dependências'
-
-          - script: |
-              cd frontend/finops-portal
-              echo "VITE_API_BASE_URL=$(ApiBaseUrl)" > .env.production
-              echo "VITE_ENTRA_CLIENT_ID=$(VITE_ENTRA_CLIENT_ID)" >> .env.production
-              echo "VITE_ENTRA_TENANT_ID=$(VITE_ENTRA_TENANT_ID)" >> .env.production
-              echo "VITE_ENTRA_REDIRECT_URI=$(VITE_ENTRA_REDIRECT_URI)" >> .env.production
-              npm run build
-            displayName: 'Build do frontend'
-
-          - publish: frontend/finops-portal/dist
-            artifact: 'FinOpsFrontend'
-            condition: succeeded()
-
-  - stage: Deploy_Frontend
-    displayName: 'Deploy Frontend'
-    dependsOn: Build_Frontend
-    jobs:
-      - job: Deploy
-        displayName: 'Deploy to Storage Static Website'
-        steps:
-          - download: current
-            artifact: 'FinOpsFrontend'
-
-          - task: AzureCLI@2
-            displayName: 'Upload para $web'
-            inputs:
-              azureSubscription: '$(ServiceConnection)'
-              scriptType: 'bash'
-              scriptLocation: 'inlineScript'
-              inlineScript: |
-                # Obter chave do storage account
-                ACCOUNT_KEY=$(az storage account keys list \
-                  --account-name $(StorageAccountName) \
-                  --query '[0].value' -o tsv)
-
-                # Upload sem limpeza previa para evitar que index.html em cache
-                # referencie assets hashados que ja foram removidos do storage.
-                az storage blob upload-batch \
-                  --account-name $(StorageAccountName) \
-                  --source $(Pipeline.Workspace)/FinOpsFrontend \
-                  --destination '$web' \
-                  --account-key "$ACCOUNT_KEY" \
-                  --content-cache-control "no-cache, no-store, must-revalidate" \
-                  --overwrite
-
-                echo "✅ Frontend deployed to $(StorageAccountName)"
-
-          - task: AzureCLI@2
-            displayName: 'Invalida Cache do AFD Standard'
-            inputs:
-              azureSubscription: '$(ServiceConnectionFrontDoor)'
-              scriptType: 'bash'
-              scriptLocation: 'inlineScript'
-              inlineScript: |
-               # Executa purge AFD Standard
-                echo "🧹 Executando purge AFD Standard..."
-                echo "Command: az afd endpoint purge --resource-group 'frontdoor-dev-rg' --profile-name 'frontdoor2-dev-afd' --endpoint-name 'finopsplatform-dev-fde' --domains 'finops.personal.com.br' --content-paths '/*' --no-wait"
-        
-                az afd endpoint purge \
-                  --resource-group "frontdoor-dev-rg" \
-                  --profile-name "frontdoor2-dev-afd" \
-                  --endpoint-name "finopsplatform-dev-fde" \
-                  --domains "finops.personal.com.br" \
-                  --content-paths '/*' \
-                  --no-wait
-        
-                echo ""
-                echo "✅ Purge AFD Standard executado com sucesso!"
-                echo "📄 Invalidação: todos os arquivos (/*)"
-                echo "⏰ Propagação: até 10-20 minutos para efeito global"
+  - template: ./templates/frontend/deploy-frontend-pcl.yml@DEVOPS
+    parameters:
+      ArtifactName: '${{ variables.FrontendArtifactName }}'
+      NamePipelineBuild: 'FinOps-Front-build-portal'
+      Project: 'azure-finops-function'
+      Ambiente: '${{ variables.Ambiente }}'
+      NomeAplicacao: '$(NomeAplicacao)'
+      NomeStorage: '$(NomeStorage)'
+      ComponenteDeDominio: 'finops'
+      FrontDoorResourceGroup: '$(FrontDoorResourceGroup)'
+      FrontDoorProfileName: '$(FrontDoorProfileName)'
+      FrontDoorEndpointName: '$(FrontDoorEndpointName)'
+      FrontDoorDomain: '$(PortalDomain)'
+      # Sem limpar o $web antes do upload: evita tela branca por index.html em cache apontando para
+      # assets já removidos. Arquivos de deploys anteriores são apagados após 7 dias.
+      cleanStrategy: 'prune'
+      pruneRetentionDays: 7
+      contentCacheControl: 'no-cache, no-store, must-revalidate'

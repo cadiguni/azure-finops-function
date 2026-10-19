@@ -12,10 +12,45 @@ namespace Personal.FinOpsApi.AzureFunctions.UnitTests.Services;
 public class AnalysisStorageServiceTests
 {
     [Fact]
+    public void PayloadQuality_WhenCandidateLosesCostsToUnavailable_ShouldPreserveExisting()
+    {
+        const string existing = """
+        {"recommendations":[{"observedCost":12.3,"costProvenance":{"source":"CostManagementExport"}}]}
+        """;
+        const string candidate = """
+        {"recommendations":[{"observedCost":null,"estimatedMonthlyCost":0,"costProvenance":{"source":"Unavailable"}}]}
+        """;
+
+        var existingQuality = AnalysisStorageService.EvaluateRecommendationPayload(existing);
+        var candidateQuality = AnalysisStorageService.EvaluateRecommendationPayload(candidate);
+
+        existingQuality.AvailableCostCount.Should().Be(1);
+        candidateQuality.UnavailableCostCount.Should().Be(1);
+        AnalysisStorageService.ShouldPreserveExistingPayload(existingQuality, candidateQuality).Should().BeTrue();
+    }
+
+    [Fact]
+    public void PayloadQuality_WhenCandidateHasValidZeroObservedCost_ShouldAllowUpdate()
+    {
+        const string existing = """
+        {"recommendations":[{"observedCost":12.3,"costProvenance":{"source":"CostManagementExport"}}]}
+        """;
+        const string candidate = """
+        {"recommendations":[{"observedCost":0,"estimatedMonthlyCost":0,"costProvenance":{"source":"CostManagementExport"}}]}
+        """;
+
+        var existingQuality = AnalysisStorageService.EvaluateRecommendationPayload(existing);
+        var candidateQuality = AnalysisStorageService.EvaluateRecommendationPayload(candidate);
+
+        candidateQuality.AvailableCostCount.Should().Be(1);
+        AnalysisStorageService.ShouldPreserveExistingPayload(existingQuality, candidateQuality).Should().BeFalse();
+    }
+
+    [Fact]
     public void NormalizeSubscriptionId_WhenGuid_ShouldReturnSameGuid()
     {
         var sut = BuildService();
-        var guid = "504a622c-3995-46c5-8ba7-8edb365ed17b";
+        var guid = "00000000-0000-0000-0000-00000000a004";
 
         var normalized = InvokeNormalizeSubscriptionId(sut, guid);
 
@@ -27,12 +62,12 @@ public class AnalysisStorageServiceTests
     {
         var sut = BuildService();
         var payload = """
-        {"SubscriptionId":"504a622c-3995-46c5-8ba7-8edb365ed17b","AnalysisType":"manual-test"}
+        {"SubscriptionId":"00000000-0000-0000-0000-00000000a004","AnalysisType":"manual-test"}
         """;
 
         var normalized = InvokeNormalizeSubscriptionId(sut, payload);
 
-        normalized.Should().Be("504a622c-3995-46c5-8ba7-8edb365ed17b");
+        normalized.Should().Be("00000000-0000-0000-0000-00000000a004");
     }
 
     [Fact]

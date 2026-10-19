@@ -318,21 +318,10 @@ public class StorageAccountAnalyzer
             }
 
             // Estimativa de custo baseada no SKU (fallback)
-            decimal estimatedMonthlyCostBySku = sku?.ToLower() switch
-            {
-                var s when s?.Contains("standard_lrs") == true => 15.00m,
-                var s when s?.Contains("standard_grs") == true => 25.00m,
-                var s when s?.Contains("standard_zrs") == true => 20.00m,
-                var s when s?.Contains("premium") == true => 120.00m,
-                _ => 18.00m
-            };
-
-            // 💰 CUSTO REAL: Buscar do Cost Management primeiro, fallback para tabela por SKU
             var costData = await _costLookupService.GetResourceCostDataAsync(subscriptionId ?? "", resourceId);
-            var hasRealBaseline = costData.MonthlyCost > 0;
-            var dailyCost = hasRealBaseline ? costData.DailyCost : estimatedMonthlyCostBySku / 30;
-            var estimatedMonthlyCost = hasRealBaseline ? costData.MonthlyCost : estimatedMonthlyCostBySku;
-            var costSource = hasRealBaseline ? "cost-management" : "sku-fallback";
+            var dailyCost = costData.DailyCost;
+            var estimatedMonthlyCost = costData.MonthlyCost;
+            var costSource = costData.CostSource;
 
             // Economia baseada no nível de subutilização
             var savingsPercentage = metrics.AvgTransactionsPerDay < 1 ? 0.9m : 0.7m; // 90% se quase sem uso, 70% se baixo uso
@@ -349,8 +338,10 @@ public class StorageAccountAnalyzer
                 Location = location ?? "",
                 DailyCost = dailyCost,
                 EstimatedMonthlyCost = estimatedMonthlyCost,
+                CostProvenance = costData.Provenance,
+                ObservedCost = costData.ObservedCost,
                 EstimatedMonthlySavings = monthlySavings,
-                Currency = "BRL",
+                Currency = string.IsNullOrWhiteSpace(costData.Currency) ? "BRL" : costData.Currency,
                 Priority = monthlySavings > 50 ? FindingPriorities.HIGH : 
                           monthlySavings > 20 ? FindingPriorities.MEDIUM : FindingPriorities.LOW,
                 Confidence = metrics.AvgTransactionsPerDay < 1 ? 0.9 : 0.7, // Alta confiança se quase sem uso
@@ -371,7 +362,11 @@ public class StorageAccountAnalyzer
                     { "potentialSavingsPercentage", (double)savingsPercentage },
                     { "confidence", metrics.AvgTransactionsPerDay < 1 ? "high" : "medium" },
                     { "costSource", costSource },
-                    { "estimatedMonthlyCostSkuFallback", estimatedMonthlyCostBySku },
+                    { "costMatchConfidence", costData.CostMatchConfidence },
+                    { "costMatchedResourceId", costData.CostMatchedResourceId ?? resourceId },
+                    { "costPeriodFrom", costData.CostPeriodFrom ?? DateTime.UtcNow.Date.AddDays(-30) },
+                    { "costPeriodTo", costData.CostPeriodTo ?? DateTime.UtcNow.Date },
+                    { "costNote", costData.CostNote ?? string.Empty },
                     { "realCostFromApi", costData.MonthlyCost }
                 }
             };

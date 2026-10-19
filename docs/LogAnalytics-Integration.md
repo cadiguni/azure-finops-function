@@ -2,7 +2,7 @@
 
 ## 🎯 Visão Geral
 
-A integração com **Log Analytics** permite criar dashboards poderosos para visualizar recomendações de FinOps usando **KQL queries**, **Azure Workbooks** e **Grafana**.
+A integração com **Log Analytics** permite criar dashboards para visualizar recomendações de FinOps usando **KQL queries** e **Azure Workbooks**.
 
 ## ⚙️ Configuração Necessária no Azure
 
@@ -252,7 +252,7 @@ Cada recomendação gera um registro com:
 
 ## 🎯 Benefícios
 
-✅ **Dashboards nativos** com Azure Workbooks/Grafana  
+✅ **Dashboards nativos** com Azure Workbooks
 ✅ **Queries poderosas** com KQL  
 ✅ **Alertas automáticos** baseados em economia  
 ✅ **Histórico completo** de recomendações  

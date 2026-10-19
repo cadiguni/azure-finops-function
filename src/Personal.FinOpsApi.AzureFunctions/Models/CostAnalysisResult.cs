@@ -23,6 +23,10 @@ public class CostAnalysisResult
 
 public class CostRecommendation
 {
+    public CostReadProvenance? CostProvenance { get; set; }
+    // Observed amount for the matched resource/parent, not a monthly projection or a share allocation.
+    public decimal? ObservedCost { get; set; }
+
     /// <summary>
     /// Tipo da recomendação
     /// </summary>
@@ -74,9 +78,54 @@ public class CostRecommendation
     public decimal DailyCost { get; set; }
 
     /// <summary>
-    /// Economia estimada por mês (USD)
+    /// Valor de custo associado (pode ser exato ou aproximado conforme fonte/confiança)
+    /// </summary>
+    public decimal? CostAmount { get; set; }
+
+    /// <summary>
+    /// Moeda do custo associado
+    /// </summary>
+    public string CostCurrency { get; set; } = "BRL";
+
+    /// <summary>
+    /// Início do período consultado para match de custo
+    /// </summary>
+    public DateTime? CostPeriodFrom { get; set; }
+
+    /// <summary>
+    /// Fim do período consultado para match de custo
+    /// </summary>
+    public DateTime? CostPeriodTo { get; set; }
+
+    /// <summary>
+    /// Fonte do match de custo: ResourceId, ParentResource, ServiceAndMeter ou NotMatched
+    /// </summary>
+    public string CostSource { get; set; } = CostMatchSources.NotMatched;
+
+    /// <summary>
+    /// Nível de confiança do match de custo: High, Medium, Low
+    /// </summary>
+    public string CostMatchConfidence { get; set; } = CostMatchConfidenceLevels.Low;
+
+    /// <summary>
+    /// ResourceId que originou o custo associado
+    /// </summary>
+    public string? CostMatchedResourceId { get; set; }
+
+    /// <summary>
+    /// Observação sobre o match de custo
+    /// </summary>
+    public string CostNote { get; set; } = "Não foi possível associar custo para este recurso no período consultado.";
+
+    /// <summary>
+    /// Economia estimada por mês, na moeda informada em CostCurrency/Currency
     /// </summary>
     public decimal EstimatedMonthlySavings { get; set; }
+
+    /// <summary>
+    /// Quantified, NotEstimated or ExcludedFromTotal (shared/overlapping amount).
+    /// </summary>
+    public string SavingsStatus { get; set; } = string.Empty;
     
     /// <summary>
     /// Moeda (BRL, USD, etc.)
@@ -89,7 +138,7 @@ public class CostRecommendation
     public decimal Confidence { get; set; }
     
     /// <summary>
-    /// Economia mensal potencial (USD) - mesmo que EstimatedMonthlySavings
+    /// Economia mensal potencial - mesmo valor de EstimatedMonthlySavings
     /// </summary>
     public decimal PotentialMonthlySavings
     {

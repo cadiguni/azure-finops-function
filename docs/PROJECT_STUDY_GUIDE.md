@@ -63,26 +63,15 @@ Triggers HTTP / Timer / Service Bus executam a lógica
 
 ## Principais fluxos da aplicação
 
-### 1. Análise manual por HTTP
+### 1. Importação de custos por Export
 
 Entrada principal:
 
-- Function: `analyze-costs`
-- Arquivo: `Functions/HealthFunction.cs`
-- Serviço central: `CostAnalysisOrchestrator`
+- Function: `CostExportImportTimer`;
+- arquivo: `Functions/CostExportImportTimerFunction.cs`;
+- serviço central: `CostExportImportService`.
 
-Essa função recebe uma requisição HTTP `GET` ou `POST`, monta um `CostAnalysisRequest` e chama:
-
-```csharp
-_orchestrator.ExecuteAnalysisAsync(request)
-```
-
-Depois tenta salvar o resultado em dois formatos:
-
-- formato padronizado em Blob Storage via `AnalysisStorageService`;
-- formato legado via `FinOpsResultAggregator`.
-
-Por segurança, o `GET` sem `dryRun` explícito força `dryRun=true`. Isso evita que uma chamada acidental seja interpretada como execução real.
+O timer importa manifests e CSVs novos, atualiza os snapshots no Blob Storage e enfileira uma nova análise de anomalias quando promove dados. A API HTTP legada `analyze-costs` foi removida; execuções operacionais passam pelos timers e pelo Service Bus.
 
 ### 2. Análise agendada por Timer
 
@@ -208,19 +197,19 @@ cost/byResource/date=YYYY-MM-DD/subscriptionId={sub}/byResource.json
 cost/byResource/date=YYYY-MM-DD/subscriptionId={sub}/raw.json
 ```
 
-### 6. APIs para Grafana
+### 6. APIs de custo do portal
 
 Arquivo:
 
-- `Functions/GrafanaApiFunction.cs`
+- `Functions/CostApiFunction.cs`
 
 Endpoints principais:
 
-- `GET /api/grafana/health`
-- `GET /api/GrafanaCostByService?date=YYYY-MM-DD&subscription=all`
-- `GET /api/GrafanaCostTrendByService?from=YYYY-MM-DD&to=YYYY-MM-DD&subscription=all&service=...`
-- `GET /api/GrafanaCostByResource?date=YYYY-MM-DD&subscription=all&service=...`
-- `GET /api/GrafanaCostTrendByResource?from=YYYY-MM-DD&to=YYYY-MM-DD&subscription=all&resource=...`
+- `GET /api/cost/health`
+- `GET /api/cost/by-service?date=YYYY-MM-DD&subscription=all&service=...&currency=...`
+- `GET /api/cost/trend-by-service?from=YYYY-MM-DD&to=YYYY-MM-DD&subscription=all&service=...&currency=...`
+- `GET /api/cost/by-resource?date=YYYY-MM-DD&subscription=all&service=...&resource=...&resourceGroup=...&currency=...`
+- `GET /api/cost/trend-by-resource?from=YYYY-MM-DD&to=YYYY-MM-DD&subscription=all&resource=...&resourceGroup=...&currency=...`
 
 Esses endpoints não consultam a Azure em tempo real. Eles leem dados já salvos no Blob Storage. Isso é bom para dashboards porque reduz custo, latência e risco de rate limit.
 
@@ -516,13 +505,13 @@ Sugestão de ordem:
 1. Leia `README.md` para comandos e variáveis.
 2. Leia `Program.cs` para entender quais serviços existem.
 3. Leia `Models/CostAnalysisRequest.cs` e `Models/StandardAnalyzerContract.cs`.
-4. Leia `Functions/HealthFunction.cs`, principalmente `analyze-costs`.
+4. Leia `Functions/CostExportImportTimerFunction.cs` e `Services/CostExportImportService.cs`.
 5. Leia `Application/CostAnalysisOrchestrator.cs`.
 6. Leia um analyzer simples, como `UnattachedDiskAnalyzer.cs`.
 7. Leia um analyzer com métricas, como `IdleVmAnalyzer.cs`.
 8. Leia `AnalysisStorageService.cs` para entender onde os resultados ficam.
 9. Leia `SubscriptionAnalysisStepFunction.cs` para entender o fluxo assíncrono.
-10. Leia `GrafanaApiFunction.cs` para entender como os dados viram dashboard.
+10. Leia `CostApiFunction.cs` para entender como os dados são expostos ao portal.
 
 ## Conceitos de programação usados
 
@@ -601,7 +590,7 @@ Findings são normalizados
 Blob Storage guarda recommendations.json e dados de custo
         |
         v
-APIs, relatórios e Grafana leem esses dados
+APIs e relatórios leem esses dados
 ```
 
 Em outras palavras: a plataforma coleta dados da Azure, identifica oportunidades de economia e transforma isso em arquivos e APIs consumíveis por relatórios e dashboards.

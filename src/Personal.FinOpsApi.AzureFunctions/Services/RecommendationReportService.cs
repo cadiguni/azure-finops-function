@@ -8,6 +8,11 @@ namespace Personal.FinOpsApi.AzureFunctions.Services;
 /// </summary>
 public class RecommendationReport
 {
+    public string? SnapshotRevision { get; set; }
+    public CostReportFinancialSummary? FinancialSummary { get; set; }
+    public string PeriodFrom { get; set; } = "";
+    public string PeriodTo { get; set; } = "";
+    public string Scope { get; set; } = "global";
     public DateTime AnalysisDate { get; set; }
     public DateTime GeneratedAt { get; set; }
     public string Currency { get; set; } = "BRL";
@@ -19,6 +24,9 @@ public class ReportSummary
 {
     public int TotalRecommendations { get; set; }
     public decimal TotalPotentialSavings { get; set; }
+    /// <summary>Currency of TotalPotentialSavings and of every savings subtotal.</summary>
+    public string? SavingsCurrency { get; set; }
+    public decimal? ObservedCostTotal { get; set; }
     public Dictionary<string, int> ActionBreakdown { get; set; } = new();
     public Dictionary<string, decimal> SavingsByAction { get; set; } = new();
 }
@@ -50,6 +58,21 @@ public class ResourceGroupReport
 
 public class ActionableRecommendation
 {
+    public decimal? ObservedCost { get; set; }
+    public CostReadProvenance? CostProvenance { get; set; }
+    public string CostScope { get; set; } = "Missing";
+    public string CostGroupKey { get; set; } = "";
+    public string Currency { get; set; } = "";
+    public string Status { get; set; } = "";
+    public DateTime? CostPeriodFrom { get; set; }
+    public DateTime? CostPeriodTo { get; set; }
+    public string RecommendationText { get; set; } = string.Empty;
+    public string RecommendationType { get; set; } = string.Empty;
+    public string Impact { get; set; } = string.Empty;
+    public string CostSource { get; set; } = CostMatchSources.NotMatched;
+    public string CostMatchConfidence { get; set; } = CostMatchConfidenceLevels.Low;
+    public string? CostMatchedResourceId { get; set; }
+    public string CostNote { get; set; } = string.Empty;
     public string ResourceId { get; set; } = string.Empty;
     public string ResourceName { get; set; } = string.Empty;
     public string ResourceType { get; set; } = string.Empty;
@@ -58,6 +81,7 @@ public class ActionableRecommendation
     public string Priority { get; set; } = string.Empty;
     public string Confidence { get; set; } = string.Empty;
     public decimal PotentialSavings { get; set; }
+    public string SavingsStatus { get; set; } = string.Empty;
     public decimal CurrentCost { get; set; }
     /// <summary>
     /// Custo diário médio real
@@ -79,166 +103,118 @@ public interface IRecommendationReportService
 /// </summary>
 public class RecommendationReportService : IRecommendationReportService
 {
-    private readonly AnalysisStorageService _storageService;
-    private readonly AzureManagementGroupService _managementGroupService;
-    private readonly TeamSubscriptionsService _teamSubscriptionsService;
-    private readonly ILogger<RecommendationReportService> _logger;
+    private readonly Repositories.IDashboardSummaryRepository _summaries;
+    private readonly IReportSnapshotStore _snapshots;
 
-    public RecommendationReportService(
-        AnalysisStorageService storageService,
-        AzureManagementGroupService managementGroupService,
-        TeamSubscriptionsService teamSubscriptionsService,
-        ILogger<RecommendationReportService> logger)
+    public RecommendationReportService(Repositories.IDashboardSummaryRepository summaries, IReportSnapshotStore snapshots)
     {
-        _storageService = storageService;
-        _managementGroupService = managementGroupService;
-        _teamSubscriptionsService = teamSubscriptionsService;
-        _logger = logger;
+        _summaries = summaries;
+        _snapshots = snapshots;
     }
 
-    /// <summary>
-    /// Gera relatório consolidado de recomendações
-    /// </summary>
-    public async Task<RecommendationReport> GenerateReportAsync(
-        DateTime analysisDate,
-        string? managementGroupFilter = null,
-        string? subscriptionFilter = null)
+    public Task<RecommendationReport> GenerateReportAsync(DateTime analysisDate, string? managementGroupFilter = null, string? subscriptionFilter = null)
     {
-        _logger.LogInformation("📊 Gerando relatório de recomendações para {date}", analysisDate.ToString("yyyy-MM-dd"));
+        if (!string.IsNullOrWhiteSpace(managementGroupFilter))
+            throw new ArgumentException("Use filtro por time ou assinatura; managementGroup não possui snapshot financeiro.");
+        return LoadAsync(analysisDate, string.IsNullOrWhiteSpace(subscriptionFilter) ? "global" : $"subscription:{subscriptionFilter}");
+    }
 
-        var recommendations = await _storageService.GetDailyAnalysisAsync(analysisDate);
-        _logger.LogInformation("📄 Carregadas {count} recomendações", recommendations.Count);
+    public Task<RecommendationReport> GenerateReportByTeamAsync(DateTime analysisDate, string? teamFilter = null)
+        => LoadAsync(analysisDate, string.IsNullOrWhiteSpace(teamFilter) ? "global" : $"team:{teamFilter}");
 
-        // Aplicar filtros se necessário
-        if (!string.IsNullOrEmpty(managementGroupFilter))
+    private async Task<RecommendationReport> LoadAsync(DateTime date, string scope)
+    {
+        var (_, global) = await DashboardSnapshotSelection.ResolveAsync(_summaries, date);
+        if (global?.SnapshotRevision == null)
+            throw new FileNotFoundException("Snapshot financeiro versionado ainda não disponível. Aguarde a geração dos sumários.");
+        return await _snapshots.LoadAsync(global.SnapshotRevision, scope)
+            ?? throw new FileNotFoundException("Escopo não encontrado no snapshot financeiro selecionado.");
+    }
+
+    public static RecommendationReport BuildSnapshot(DashboardSummaryDocument summary,
+        IReadOnlyList<(CostRecommendation Recommendation, string Status, bool Active)> items)
+    {
+        // Assign each charged resource's potential to one action, deterministically. Each amount stays in
+        // its own currency: a mixed-currency scope only prevents a scalar total, not per-resource savings.
+        var allocated = new Dictionary<CostRecommendation, decimal>();
+        var reportCurrency = summary.FinancialSummary?.Currency;
+        foreach (var group in items.Where(item => item.Active)
+                     .GroupBy(item => (RecommendationCostAccounting.Key(item.Recommendation),
+                         item.Recommendation.CostCurrency.Trim().ToUpperInvariant())))
         {
-            recommendations = recommendations.Where(r => r.ManagementGroupId == managementGroupFilter).ToList();
+            var winner = group.OrderByDescending(i => RecommendationCostAccounting.Savings(new[] { i.Recommendation }))
+                .ThenBy(i => i.Recommendation.Type, StringComparer.Ordinal).First().Recommendation;
+            allocated[winner] = RecommendationCostAccounting.Savings(group.Select(i => i.Recommendation));
         }
-
-        if (!string.IsNullOrEmpty(subscriptionFilter))
-        {
-            recommendations = recommendations.Where(r => r.SubscriptionId == subscriptionFilter).ToList();
-        }
-
+        var savingsCurrency = summary.SavingsCurrency ?? RecommendationCostAccounting.SavingsCurrency(
+            items.Where(item => item.Active).Select(item => item.Recommendation), reportCurrency);
+        decimal Totalled(ActionableRecommendation r) => savingsCurrency != null
+            && r.Currency.Trim().Equals(savingsCurrency, StringComparison.OrdinalIgnoreCase) ? r.PotentialSavings : 0m;
         var report = new RecommendationReport
         {
-            AnalysisDate = analysisDate,
-            GeneratedAt = DateTime.UtcNow,
-            ManagementGroups = await BuildManagementGroupReportsAsync(recommendations),
-            Summary = BuildReportSummary(recommendations)
+            AnalysisDate = DateTime.ParseExact(summary.Date, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
+            GeneratedAt = summary.UpdatedAt, SnapshotRevision = summary.SnapshotRevision,
+            FinancialSummary = summary.FinancialSummary, Scope = summary.ScopeKey,
+            PeriodFrom = summary.PeriodFrom, PeriodTo = summary.PeriodTo,
+            Currency = summary.FinancialSummary?.Currency ?? savingsCurrency ?? "",
+            Summary = new ReportSummary { TotalRecommendations = items.Count,
+                SavingsCurrency = savingsCurrency,
+                ObservedCostTotal = RecommendationCostAccounting.ObservedTotal(
+                    items.Select(item => item.Recommendation), reportCurrency ?? savingsCurrency) }
         };
-
-        _logger.LogInformation("✅ Relatório gerado: {mgCount} MGs, {recCount} recomendações, R$ {savings:N2} potencial",
-            report.ManagementGroups.Count, report.Summary.TotalRecommendations, report.Summary.TotalPotentialSavings);
-
+        foreach (var mg in items.GroupBy(i => i.Recommendation.ManagementGroupId ?? "unassigned"))
+        {
+            var mgReport = new ManagementGroupReport { Id = mg.Key, Name = mg.Key, TotalRecommendations = mg.Count() };
+            foreach (var sub in mg.GroupBy(i => i.Recommendation.SubscriptionId))
+            {
+                var subReport = new SubscriptionReport { Id = sub.Key, Name = sub.Key, TotalRecommendations = sub.Count() };
+                foreach (var rg in sub.GroupBy(i => i.Recommendation.ResourceGroup))
+                {
+                    var rgReport = new ResourceGroupReport
+                    {
+                        Name = rg.Key,
+                        Location = rg.First().Recommendation.Location
+                    };
+                    foreach (var item in rg)
+                    {
+                        var r = item.Recommendation;
+                        var action = ClassifyRecommendationAction(r);
+                        var savings = allocated.GetValueOrDefault(r);
+                        var actionable = new ActionableRecommendation
+                        {
+                            ResourceId = r.ResourceId, ResourceName = r.ResourceName, ResourceType = r.ResourceType,
+                            Description = r.Description, Action = action, Priority = r.Priority,
+                            RecommendationText = r.Recommendation, RecommendationType = r.Type, Impact = r.Impact,
+                            Confidence = r.Confidence.ToString("P0"), Status = item.Status,
+                            CurrentCost = r.ObservedCost.HasValue ? r.EstimatedMonthlyCost : 0,
+                            DailyCost = r.ObservedCost.HasValue ? r.DailyCost : 0,
+                            PotentialSavings = savings,
+                            SavingsStatus = savings > 0 ? "Quantified"
+                                : r.EstimatedMonthlySavings > 0 ? "ExcludedFromTotal" : "NotEstimated",
+                            ObservedCost = r.ObservedCost,
+                            CostProvenance = r.CostProvenance, CostScope = RecommendationCostAccounting.Scope(r),
+                            CostGroupKey = RecommendationCostAccounting.Key(r), Currency = r.CostCurrency,
+                            CostPeriodFrom = r.CostPeriodFrom, CostPeriodTo = r.CostPeriodTo,
+                            CostSource = r.CostSource, CostMatchConfidence = r.CostMatchConfidence,
+                            CostMatchedResourceId = r.CostMatchedResourceId, CostNote = r.CostNote
+                        };
+                        rgReport.Recommendations.Add(actionable);
+                        report.Summary.ActionBreakdown[action] = report.Summary.ActionBreakdown.GetValueOrDefault(action) + 1;
+                        report.Summary.SavingsByAction[action] = report.Summary.SavingsByAction.GetValueOrDefault(action) + Totalled(actionable);
+                    }
+                    subReport.ResourceGroups.Add(rgReport);
+                }
+                subReport.TotalSavings = subReport.ResourceGroups.Sum(g => g.Recommendations.Sum(Totalled));
+                mgReport.Subscriptions.Add(subReport);
+            }
+            mgReport.TotalSavings = mgReport.Subscriptions.Sum(s => s.TotalSavings);
+            report.ManagementGroups.Add(mgReport);
+        }
+        report.Summary.TotalPotentialSavings = report.ManagementGroups.Sum(mg => mg.TotalSavings);
         return report;
     }
 
-    private async Task<List<ManagementGroupReport>> BuildManagementGroupReportsAsync(List<CostRecommendation> recommendations)
-    {
-        var managementGroups = await _managementGroupService.GetManagementGroupsAsync();
-        var subscriptionNames = await _teamSubscriptionsService.GetSubscriptionNameMappingsAsync();
-        
-        var mgGroups = recommendations
-            .Where(r => !string.IsNullOrEmpty(r.ManagementGroupId))
-            .GroupBy(r => r.ManagementGroupId)
-            .ToList();
-
-        var mgReports = new List<ManagementGroupReport>();
-
-        if (mgGroups.Count == 0)
-        {
-            // Fallback: agrupa por subscription quando não há MG mapeados
-            // Cria um "MG virtual" para cada subscription
-            var subscriptionGroups = recommendations
-                .GroupBy(r => r.SubscriptionId)
-                .ToList();
-
-            foreach (var subGroup in subscriptionGroups)
-            {
-                var subRecs = subGroup.ToList();
-                var subName = subscriptionNames.GetValueOrDefault(subGroup.Key, subGroup.Key);
-                
-                var mgReport = new ManagementGroupReport
-                {
-                    Id = subGroup.Key,
-                    Name = $"Subscription: {subName}",
-                    TotalSavings = subRecs.Sum(r => r.EstimatedMonthlySavings),
-                    TotalRecommendations = subRecs.Count,
-                    Subscriptions = BuildSubscriptionReports(subRecs, subscriptionNames)
-                };
-                mgReports.Add(mgReport);
-            }
-            
-            return mgReports.OrderByDescending(mg => mg.TotalSavings).ToList();
-        }
-
-        foreach (var mgGroup in mgGroups)
-        {
-            var mgRecs = mgGroup.ToList();
-            var mgReport = new ManagementGroupReport
-            {
-                Id = mgGroup.Key,
-                Name = managementGroups.GetValueOrDefault(mgGroup.Key, mgGroup.Key),
-                TotalSavings = mgRecs.Sum(r => r.EstimatedMonthlySavings),
-                TotalRecommendations = mgRecs.Count,
-                Subscriptions = BuildSubscriptionReports(mgRecs, subscriptionNames)
-            };
-
-            mgReports.Add(mgReport);
-        }
-
-        return mgReports.OrderByDescending(mg => mg.TotalSavings).ToList();
-    }
-
-    private List<SubscriptionReport> BuildSubscriptionReports(List<CostRecommendation> recommendations, Dictionary<string, string> subscriptionNames)
-    {
-        return recommendations
-            .GroupBy(r => r.SubscriptionId)
-            .Select(subGroup => new SubscriptionReport
-            {
-                Id = subGroup.Key,
-                Name = subscriptionNames.GetValueOrDefault(subGroup.Key, subGroup.Key), // Usa nome do time config ou fallback para ID
-                TotalSavings = subGroup.Sum(r => r.EstimatedMonthlySavings),
-                TotalRecommendations = subGroup.Count(),
-                ResourceGroups = BuildResourceGroupReports(subGroup.ToList())
-            })
-            .OrderByDescending(s => s.TotalSavings)
-            .ToList();
-    }
-
-    private List<ResourceGroupReport> BuildResourceGroupReports(List<CostRecommendation> recommendations)
-    {
-        return recommendations
-            .GroupBy(r => r.ResourceGroup)
-            .Select(rgGroup => new ResourceGroupReport
-            {
-                Name = rgGroup.Key,
-                Location = rgGroup.FirstOrDefault()?.Location ?? "unknown",
-                Recommendations = rgGroup.Select(r => new ActionableRecommendation
-                {
-                    ResourceId = r.ResourceId,
-                    ResourceName = r.ResourceName,
-                    ResourceType = r.ResourceType,
-                    Description = r.Description,
-                    Action = ClassifyRecommendationAction(r),
-                    Priority = r.Priority,
-                    Confidence = r.Confidence.ToString("P0"), // Converter decimal para porcentagem
-                    PotentialSavings = r.EstimatedMonthlySavings,
-                    CurrentCost = r.EstimatedMonthlyCost,
-                    DailyCost = r.DailyCost
-                })
-                .OrderByDescending(r => r.PotentialSavings)
-                .ToList()
-            })
-            .OrderByDescending(rg => rg.Recommendations.Sum(r => r.PotentialSavings))
-            .ToList();
-    }
-
-    /// <summary>
-    /// Classifica recomendação em ação operacional
-    /// </summary>
-    private string ClassifyRecommendationAction(CostRecommendation recommendation)
+    private static string ClassifyRecommendationAction(CostRecommendation recommendation)
     {
         var description = recommendation.Description.ToLowerInvariant();
         var resourceType = recommendation.ResourceType.ToLowerInvariant();
@@ -304,92 +280,4 @@ public class RecommendationReportService : IRecommendationReportService
         return "Investigar";
     }
 
-    private ReportSummary BuildReportSummary(List<CostRecommendation> recommendations)
-    {
-        var actionBreakdown = new Dictionary<string, int>();
-        var savingsByAction = new Dictionary<string, decimal>();
-
-        foreach (var rec in recommendations)
-        {
-            var action = ClassifyRecommendationAction(rec);
-            actionBreakdown[action] = actionBreakdown.GetValueOrDefault(action, 0) + 1;
-            savingsByAction[action] = savingsByAction.GetValueOrDefault(action, 0m) + rec.EstimatedMonthlySavings;
-        }
-
-        return new ReportSummary
-        {
-            TotalRecommendations = recommendations.Count,
-            TotalPotentialSavings = recommendations.Sum(r => r.EstimatedMonthlySavings),
-            ActionBreakdown = actionBreakdown,
-            SavingsByAction = savingsByAction
-        };
-    }
-
-    /// <summary>
-    /// Gera relatório filtrado por team - SIMPLIFICADO: filtra por subscriptions do team
-    /// </summary>
-    public async Task<RecommendationReport> GenerateReportByTeamAsync(DateTime analysisDate, string? teamFilter = null)
-    {
-        _logger.LogInformation("📊 Gerando relatório por team para {date}, team: {team}", 
-            analysisDate.ToString("yyyy-MM-dd"), teamFilter ?? "todos");
-
-        // Obter todas as recomendações
-        var allRecommendations = await _storageService.GetDailyAnalysisAsync(analysisDate);
-        _logger.LogInformation("📄 Carregadas {count} recommendations", allRecommendations.Count);
-
-        // Filtrar por team se especificado
-        var filteredRecommendations = allRecommendations;
-        if (!string.IsNullOrEmpty(teamFilter))
-        {
-            // Obter subscriptions do team
-            var teamSubscriptionIds = await _teamSubscriptionsService.GetTeamSubscriptionIdsAsync(teamFilter);
-            
-            if (teamSubscriptionIds.Count == 0)
-            {
-                _logger.LogWarning("⚠️ Team '{team}' não possui subscriptions configuradas", teamFilter);
-            }
-            else
-            {
-                _logger.LogInformation("🔍 Team '{team}' possui {count} subscriptions", teamFilter, teamSubscriptionIds.Count);
-                
-                // Filtrar recomendações que pertencem às subscriptions do team
-                filteredRecommendations = allRecommendations
-                    .Where(r => !string.IsNullOrEmpty(r.SubscriptionId) && 
-                                teamSubscriptionIds.Any(s => s.Equals(r.SubscriptionId, StringComparison.OrdinalIgnoreCase)))
-                    .ToList();
-                
-                _logger.LogInformation("📄 Filtrado para team '{team}': {count} recommendations", teamFilter, filteredRecommendations.Count);
-            }
-        }
-
-        var report = new RecommendationReport
-        {
-            AnalysisDate = analysisDate,
-            GeneratedAt = DateTime.UtcNow,
-            ManagementGroups = await BuildManagementGroupReportsAsync(filteredRecommendations),
-            Summary = BuildReportSummary(filteredRecommendations)
-        };
-
-        _logger.LogInformation("✅ Relatório gerado: {mgCount} MGs, {recCount} recomendações, R$ {savings:N2} potencial",
-            report.ManagementGroups.Count, report.Summary.TotalRecommendations, report.Summary.TotalPotentialSavings);
-
-        return report;
-    }
-
-    private static string? ExtractSubscriptionId(string resourceId)
-    {
-        if (string.IsNullOrEmpty(resourceId))
-            return null;
-
-        var parts = resourceId.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        for (int i = 0; i < parts.Length - 1; i++)
-        {
-            if (string.Equals(parts[i], "subscriptions", StringComparison.OrdinalIgnoreCase))
-            {
-                return parts[i + 1];
-            }
-        }
-
-        return null;
-    }
 }

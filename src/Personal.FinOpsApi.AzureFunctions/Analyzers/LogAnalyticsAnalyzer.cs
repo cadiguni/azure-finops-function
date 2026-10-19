@@ -156,6 +156,7 @@ public class LogAnalyticsAnalyzer
                                 { "isSentinelEnabled", isSentinelEnabled },
                                 { "topTables", topTables.Take(5).ToList() }
                             },
+                            costData: costData,
                             tags: ExtractTags(workspace)
                         ));
                     }
@@ -189,6 +190,7 @@ public class LogAnalyticsAnalyzer
                                 { "sku", sku },
                                 { "isSentinelEnabled", isSentinelEnabled }
                             },
+                            costData: costData,
                             tags: ExtractTags(workspace)
                         ));
                     }
@@ -218,6 +220,7 @@ public class LogAnalyticsAnalyzer
                                 { "analysisPeriodDays", analysisPeriodDays },
                                 { "sku", sku }
                             },
+                            costData: costData,
                             tags: ExtractTags(workspace)
                         ));
                     }
@@ -248,6 +251,7 @@ public class LogAnalyticsAnalyzer
                                 { "topTables", topTablesList },
                                 { "sku", sku }
                             },
+                            costData: costData,
                             tags: ExtractTags(workspace)
                         ));
                     }
@@ -280,6 +284,7 @@ public class LogAnalyticsAnalyzer
                                 { "desiredRetentionInDays", _desiredRetentionDays },
                                 { "tablesWithHighRetention", tablesWithHighRetention.Take(10).Select(t => new { t.TableName, t.RetentionDays }).ToList() }
                             },
+                            costData: costData,
                             tags: ExtractTags(workspace)
                         ));
                     }
@@ -628,10 +633,24 @@ public class LogAnalyticsAnalyzer
         decimal monthlyCost,
         decimal monthlySavings,
         Dictionary<string, object> metadata,
+        ResourceCostData? costData,
         Dictionary<string, string> tags)
     {
+        var metadataWithCost = new Dictionary<string, object>(metadata);
+        if (costData != null)
+        {
+            metadataWithCost["costSource"] = costData.CostSource;
+            metadataWithCost["costMatchConfidence"] = costData.CostMatchConfidence;
+            metadataWithCost["costMatchedResourceId"] = costData.CostMatchedResourceId ?? resourceId;
+            metadataWithCost["costPeriodFrom"] = costData.CostPeriodFrom ?? DateTime.UtcNow.Date.AddDays(-30);
+            metadataWithCost["costPeriodTo"] = costData.CostPeriodTo ?? DateTime.UtcNow.Date;
+            metadataWithCost["costNote"] = costData.CostNote ?? string.Empty;
+        }
+
         return new StandardFinding
         {
+            CostProvenance = costData?.Provenance,
+            ObservedCost = costData?.ObservedCost,
             Type = type,
             ResourceId = resourceId,
             ResourceName = name,
@@ -642,13 +661,13 @@ public class LogAnalyticsAnalyzer
             DailyCost = dailyCost,
             EstimatedMonthlyCost = monthlyCost,
             EstimatedMonthlySavings = monthlySavings,
-            Currency = "BRL",
+            Currency = string.IsNullOrWhiteSpace(costData?.Currency) ? "BRL" : costData.Currency,
             Priority = priority,
             Confidence = confidence,
             Description = description,
             Recommendation = recommendation,
             Tags = tags,
-            Metadata = metadata
+            Metadata = metadataWithCost
         };
     }
 

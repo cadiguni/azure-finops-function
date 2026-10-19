@@ -1,5 +1,6 @@
 using Personal.FinOpsApi.AzureFunctions.Models;
 using Personal.FinOpsApi.AzureFunctions.Services;
+using Personal.FinOpsApi.AzureFunctions.Services.Repositories;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -12,7 +13,7 @@ public class PreGeneratedReportTimerFunction
     private readonly HtmlReportBuilder _htmlBuilder;
     private readonly AnalysisStorageService _analysisStorageService;
     private readonly TeamSubscriptionsService _teamService;
-    private readonly CostAnomalyStorageService _anomalyStorageService;
+    private readonly ICostAnomalyReportRepository _costAnomalyReportRepository;
     private readonly PreGeneratedReportStorageService _reportStorageService;
     private readonly IConfiguration _configuration;
     private readonly ILogger<PreGeneratedReportTimerFunction> _logger;
@@ -22,7 +23,7 @@ public class PreGeneratedReportTimerFunction
         HtmlReportBuilder htmlBuilder,
         AnalysisStorageService analysisStorageService,
         TeamSubscriptionsService teamService,
-        CostAnomalyStorageService anomalyStorageService,
+        ICostAnomalyReportRepository costAnomalyReportRepository,
         PreGeneratedReportStorageService reportStorageService,
         IConfiguration configuration,
         ILogger<PreGeneratedReportTimerFunction> logger)
@@ -31,7 +32,7 @@ public class PreGeneratedReportTimerFunction
         _htmlBuilder = htmlBuilder;
         _analysisStorageService = analysisStorageService;
         _teamService = teamService;
-        _anomalyStorageService = anomalyStorageService;
+        _costAnomalyReportRepository = costAnomalyReportRepository;
         _reportStorageService = reportStorageService;
         _configuration = configuration;
         _logger = logger;
@@ -51,8 +52,8 @@ public class PreGeneratedReportTimerFunction
         {
             _logger.LogWarning(
                 "Nenhum dado de análise encontrado para {date}. " +
-                "Verifique se o CostAnalysisTimer completou antes do ReportGenerationTimer. " +
-                "Use POST /api/generate-reports para gerar manualmente após a análise concluir.",
+                "Verifique se o CostAnalysisTimer completou antes do PreGeneratedReportTimer. " +
+                "Após a análise concluir, os relatórios serão gerados na próxima execução do timer.",
                 reportDate.ToString("yyyy-MM-dd"));
             return;
         }
@@ -131,7 +132,14 @@ public class PreGeneratedReportTimerFunction
 
         try
         {
-            return await _anomalyStorageService.LoadAnomalyReportAsync(reportDate.ToString("yyyy-MM-dd"));
+            var reports = await _costAnomalyReportRepository.LoadReportsAsync(reportDate, 1);
+            var snapshot = reports.FirstOrDefault();
+            if (snapshot != null)
+            {
+                return snapshot;
+            }
+
+            return await _costAnomalyReportRepository.LoadLatestReportAsync(cancellationToken: default);
         }
         catch (Exception ex)
         {

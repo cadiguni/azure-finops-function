@@ -2,7 +2,7 @@
 # 🚀 SOLUÇÃO: Queue-based processing para evitar timeouts
 
 resource "azurerm_servicebus_namespace" "finops" {
-  name                = "${local.aplicacao}-${local.setor}-servicebus"
+  name                = "${local.nome_base}-servicebus"
   location            = local.localizacao
   resource_group_name = azurerm_resource_group.rg.name
   sku                 = "Basic"  # Basic: ~$5/mês vs Standard ~$15/mês
@@ -26,61 +26,12 @@ resource "azurerm_servicebus_queue" "subscription_analysis" {
   # Basic não suporta duplicate detection nem auto delete
 }
 
-# Queue para Storage Account analysis (heavy workload)
-resource "azurerm_servicebus_queue" "storage_analysis" {
-  name         = "storage-analysis"
-  namespace_id = azurerm_servicebus_namespace.finops.id
-  
-  # ⚡ OPTIMIZED for heavy Azure Monitor calls (Basic tier: max 5min lock)
-  max_delivery_count                    = 10      # 🚨 AUMENTADO: 2→10 para subscriptions grandes
-  lock_duration                        = "PT5M"   # 5 minutos (Basic tier maximum)
-  default_message_ttl                  = "P7D"    # 7 dias TTL
-  
-  max_size_in_megabytes               = 1024     # Basic max: 1GB
-}
-
-# Queue para VM analysis (medium workload) 
-resource "azurerm_servicebus_queue" "vm_analysis" {
-  name         = "vm-analysis"
-  namespace_id = azurerm_servicebus_namespace.finops.id
-  
-  max_delivery_count                    = 10      # 🚨 AUMENTADO: 3→10 para evitar DLQ
-  lock_duration                        = "PT5M"   # 5 minutos (Basic tier maximum)
-  default_message_ttl                  = "P7D"
-  
-  max_size_in_megabytes               = 1024
-}
-
-# Queue para App Service analysis (light workload)
-resource "azurerm_servicebus_queue" "appservice_analysis" {
-  name         = "appservice-analysis" 
-  namespace_id = azurerm_servicebus_namespace.finops.id
-  
-  max_delivery_count                    = 10      # 🚨 AUMENTADO: 3→10 para evitar DLQ
-  lock_duration                        = "PT5M"   # 5 minutos para App Service
-  default_message_ttl                  = "P7D"
-  
-  max_size_in_megabytes               = 1024     # Basic tier max
-}
-
-# 📊 Queue para resultados consolidados (Basic não tem Topics)
-resource "azurerm_servicebus_queue" "analysis_results" {
-  name         = "analysis-results"
-  namespace_id = azurerm_servicebus_namespace.finops.id
-  
-  # 📊 RESULTS QUEUE for consolidation
-  max_delivery_count        = 10                    # 🚨 AUMENTADO: 3→10 para evitar DLQ
-  lock_duration            = "PT2M"   # 2 minutos para consolidação
-  default_message_ttl      = "P1D"    # 1 dia para resultados
-  max_size_in_megabytes    = 1024
-}
-
 # 🚀 QUEUE EXCLUSIVA PARA PRODUÇÃO: Subscription grande com configurações otimizadas
 resource "azurerm_servicebus_queue" "subscription_analysis_production" {
   name         = "subscription-analysis-production"
   namespace_id = azurerm_servicebus_namespace.finops.id
   
-  # 🎯 CONFIGURAÇÕES ESPECÍFICAS PARA PRODUÇÃO (subscription: 504a622c-3995-46c5-8ba7-8edb365ed17b)
+  # 🎯 CONFIGURAÇÕES ESPECÍFICAS PARA PRODUÇÃO (subscription: 00000000-0000-0000-0000-00000000a004)
   max_delivery_count                    = 20      # 🚨 MUITO AUMENTADO: produção precisa de mais tentativas
   lock_duration                        = "PT5M"   # 5 minutos (Basic tier maximum)
   default_message_ttl                  = "P14D"   # 14 dias TTL (Basic tier maximum)
@@ -102,6 +53,27 @@ resource "azurerm_servicebus_queue" "subscription_analysis_steps" {
   
   # 📊 SIZE menor (mínimo válido: 1024MB)
   max_size_in_megabytes               = 1024     # 1GB (mínimo válido para Basic tier)
+}
+
+# Queue para execução manual de anomalias sem segurar HTTP/Front Door aberto
+resource "azurerm_servicebus_queue" "cost_anomalies_run" {
+  name         = "cost-anomalies-run"
+  namespace_id = azurerm_servicebus_namespace.finops.id
+
+  max_delivery_count   = 3
+  lock_duration        = "PT5M"
+  default_message_ttl  = "P1D"
+  max_size_in_megabytes = 1024
+}
+
+resource "azurerm_servicebus_queue" "cost_anomalies_subscription" {
+  name         = "cost-anomalies-subscription"
+  namespace_id = azurerm_servicebus_namespace.finops.id
+
+  max_delivery_count    = 5
+  lock_duration         = "PT5M"
+  default_message_ttl   = "P1D"
+  max_size_in_megabytes = 1024
 }
 # 🔐 RBAC: Dar permissões para a Managed Identity acessar Service Bus
 # NOTA: Este role assignment precisa ser criado manualmente ou com permissões Owner/User Access Administrator

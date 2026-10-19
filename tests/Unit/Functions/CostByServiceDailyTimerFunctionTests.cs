@@ -17,8 +17,11 @@ public class CostByServiceDailyTimerFunctionTests
         var subscriptions = new[] { "sub-1", "sub-2" };
         var configuration = BuildConfiguration(new Dictionary<string, string?>
         {
-            ["COST_SUBSCRIPTIONS"] = string.Join(",", subscriptions)
+            ["EnableLegacyCostByServiceCollection"] = "true",
+            ["COST_SUBSCRIPTIONS"] = string.Join(",", subscriptions),
+            ["COST_DATA_DELAY_DAYS"] = "2"
         });
+        var expectedDate = DateTime.UtcNow.Date.AddDays(-2);
 
         var costClientMock = new Mock<ICostManagementClient>(MockBehavior.Strict);
         var repositoryMock = new Mock<ICostStorageRepository>(MockBehavior.Strict);
@@ -28,8 +31,8 @@ public class CostByServiceDailyTimerFunctionTests
             costClientMock
                 .Setup(c => c.QueryCostByServiceAsync(
                     sub,
-                    It.IsAny<DateTime>(),
-                    It.IsAny<DateTime>(),
+                    expectedDate,
+                    expectedDate,
                     "None",
                     null,
                     It.IsAny<CancellationToken>()))
@@ -52,7 +55,7 @@ public class CostByServiceDailyTimerFunctionTests
 
             repositoryMock
                 .Setup(r => r.SaveByServiceAsync(
-                    It.IsAny<DateTime>(),
+                    expectedDate,
                     sub,
                     It.Is<IReadOnlyCollection<CostByServiceRow>>(rows => rows.Count == 1),
                     "{}",
@@ -73,14 +76,14 @@ public class CostByServiceDailyTimerFunctionTests
         {
             costClientMock.Verify(c => c.QueryCostByServiceAsync(
                 sub,
-                It.IsAny<DateTime>(),
-                It.IsAny<DateTime>(),
+                expectedDate,
+                expectedDate,
                 "None",
                 null,
                 It.IsAny<CancellationToken>()), Times.Once);
 
             repositoryMock.Verify(r => r.SaveByServiceAsync(
-                It.IsAny<DateTime>(),
+                expectedDate,
                 sub,
                 It.IsAny<IReadOnlyCollection<CostByServiceRow>>(),
                 "{}",
@@ -89,10 +92,55 @@ public class CostByServiceDailyTimerFunctionTests
     }
 
     [Fact]
+    public async Task RunAsync_WhenQueryReturnsNoRows_ShouldNotOverwriteStoredData()
+    {
+        var configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["EnableLegacyCostByServiceCollection"] = "true",
+            ["COST_SUBSCRIPTIONS"] = "sub-empty",
+            ["COST_DATA_DELAY_DAYS"] = "2"
+        });
+
+        var costClientMock = new Mock<ICostManagementClient>(MockBehavior.Strict);
+        costClientMock
+            .Setup(c => c.QueryCostByServiceAsync(
+                "sub-empty",
+                It.IsAny<DateTime>(),
+                It.IsAny<DateTime>(),
+                "None",
+                null,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CostByServiceQueryResponse
+            {
+                SubscriptionId = "sub-empty",
+                Rows = new List<CostByServiceQueryRecord>(),
+                RawJson = """{"properties":{"rows":[]}}"""
+            });
+
+        var repositoryMock = new Mock<ICostStorageRepository>(MockBehavior.Strict);
+        var sut = new CostByServiceDailyTimerFunction(
+            costClientMock.Object,
+            repositoryMock.Object,
+            subscriptionDiscoveryService: null!,
+            configuration,
+            new NullLogger<CostByServiceDailyTimerFunction>());
+
+        await sut.RunAsync(null!);
+
+        repositoryMock.Verify(r => r.SaveByServiceAsync(
+            It.IsAny<DateTime>(),
+            It.IsAny<string>(),
+            It.IsAny<IReadOnlyCollection<CostByServiceRow>>(),
+            It.IsAny<string?>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task RunAsync_WhenOneSubscriptionFails_ShouldContinueWithOthers()
     {
         var configuration = BuildConfiguration(new Dictionary<string, string?>
         {
+            ["EnableLegacyCostByServiceCollection"] = "true",
             ["COST_SUBSCRIPTIONS"] = "sub-fail,sub-ok"
         });
 
@@ -157,6 +205,77 @@ public class CostByServiceDailyTimerFunctionTests
             "sub-ok",
             It.IsAny<IReadOnlyCollection<CostByServiceRow>>(),
             "{}",
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RunAsync_WhenSubscriptionIsCutOver_ShouldExcludeItAndKeepLegacySubscription()
+    {
+        var configuration = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["COST_SUBSCRIPTIONS"] = "sub-export,sub-legacy",
+            ["COST_EXPORT_SUBSCRIPTIONS"] = "sub-export",
+            ["COST_EXPORT_CUTOVER_SUBSCRIPTIONS"] = "sub-export",
+            ["EnableCostExportImport"] = "true",
+            ["EnableLegacyCostByServiceCollection"] = "true"
+        });
+
+        var costClientMock = new Mock<ICostManagementClient>(MockBehavior.Strict);
+        costClientMock
+            .Setup(c => c.QueryCostByServiceAsync(
+                "sub-legacy",
+                It.IsAny<DateTime>(),
+                It.IsAny<DateTime>(),
+                "None",
+                null,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CostByServiceQueryResponse
+            {
+                SubscriptionId = "sub-legacy",
+                Rows =
+                [
+                    new CostByServiceQueryRecord
+                    {
+                        SubscriptionId = "sub-legacy",
+                        Label = "Storage",
+                        Currency = "BRL",
+                        TotalCost = 1m
+                    }
+                ],
+                RawJson = "{}"
+            });
+        var repositoryMock = new Mock<ICostStorageRepository>(MockBehavior.Strict);
+        repositoryMock
+            .Setup(r => r.SaveByServiceAsync(
+                It.IsAny<DateTime>(),
+                "sub-legacy",
+                It.IsAny<IReadOnlyCollection<CostByServiceRow>>(),
+                "{}",
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        var sut = new CostByServiceDailyTimerFunction(
+            costClientMock.Object,
+            repositoryMock.Object,
+            subscriptionDiscoveryService: null!,
+            configuration,
+            new NullLogger<CostByServiceDailyTimerFunction>());
+
+        await sut.RunAsync(null!);
+
+        costClientMock.Verify(c => c.QueryCostByServiceAsync(
+            "sub-export",
+            It.IsAny<DateTime>(),
+            It.IsAny<DateTime>(),
+            It.IsAny<string>(),
+            It.IsAny<string?>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        costClientMock.Verify(c => c.QueryCostByServiceAsync(
+            "sub-legacy",
+            It.IsAny<DateTime>(),
+            It.IsAny<DateTime>(),
+            "None",
+            null,
             It.IsAny<CancellationToken>()), Times.Once);
     }
 

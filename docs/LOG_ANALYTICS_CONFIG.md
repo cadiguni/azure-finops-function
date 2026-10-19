@@ -10,7 +10,7 @@ No Azure Portal, vá em **Function App → Configuration → Application Setting
 
 ```bash
 # 📊 LOG ANALYTICS (Data Collector API)
-LOG_ANALYTICS_WORKSPACE_ID = "bd651986-64f7-4512-bbc5-3e7bc7d79016"
+LOG_ANALYTICS_WORKSPACE_ID = "00000000-0000-0000-0000-00000000a008"
 LOG_ANALYTICS_SHARED_KEY = "56l2/gC9xF6lQhMEfTqev6y90H7LeJi70DnwMCAL8beY7PVAGsC3aq9Nd/f7aNmUNn3oZb8Hi+XzsyvQFrufXQ=="
 LOG_ANALYTICS_LOG_TYPE = "FinOpsRecommendations"
 ```

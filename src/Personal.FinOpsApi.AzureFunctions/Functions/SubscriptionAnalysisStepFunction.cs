@@ -15,7 +15,7 @@ namespace Personal.FinOpsApi.AzureFunctions.Functions;
 /// Cada step é uma mensagem separada no Service Bus
 /// 
 /// Flow:
-/// 1. "orchestrator" → envia steps: storage, vm, appservice, publicip, etc
+/// 1. "orchestrator" → envia steps: storage, vm, appservice, functionapp, loganalytics, publicip, sql, cosmos
 /// 2. Cada step processa apenas uma parte
 /// 3. Salva resultado parcial no Blob
 /// 4. Step final consolida tudo
@@ -95,6 +95,12 @@ public class SubscriptionAnalysisStepFunction
             case "publicip":
                 await ExecutePublicIpAnalysisAsync(step);
                 break;
+            case "sql":
+                await ExecuteSqlAnalysisAsync(step);
+                break;
+            case "cosmos":
+                await ExecuteCosmosAnalysisAsync(step);
+                break;
             case "consolidate":
                 await ExecuteConsolidateStepAsync(step);
                 break;
@@ -115,7 +121,7 @@ public class SubscriptionAnalysisStepFunction
     /// </summary>
     private async Task ExecuteOrchestrateStepAsync(AnalysisStepMessage step)
     {
-        var analysisSteps = new[] { "storage", "vm", "appservice", "functionapp", "loganalytics", "publicip" };
+        var analysisSteps = new[] { "storage", "vm", "appservice", "functionapp", "loganalytics", "publicip", "sql", "cosmos" };
         
         foreach (var nextStep in analysisSteps)
         {
@@ -252,6 +258,38 @@ public class SubscriptionAnalysisStepFunction
         }
     }
 
+    private async Task ExecuteSqlAnalysisAsync(AnalysisStepMessage step)
+    {
+        _logger.LogInformation(" [SQL] Analisando SQL Databases para {subscription}", step.SubscriptionId);
+
+        try
+        {
+            var findings = await _orchestrator.AnalyzeSqlDatabasesOnlyAsync(step.SubscriptionId);
+            await SaveStepResultAsync(step, "sql", findings);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, " [SQL] Erro na análise para {subscription}. Salvando resultado vazio.", step.SubscriptionId);
+            await SaveStepResultAsync(step, "sql", new List<object>());
+        }
+    }
+
+    private async Task ExecuteCosmosAnalysisAsync(AnalysisStepMessage step)
+    {
+        _logger.LogInformation(" [COSMOS] Analisando Cosmos DB para {subscription}", step.SubscriptionId);
+
+        try
+        {
+            var findings = await _orchestrator.AnalyzeCosmosDatabasesOnlyAsync(step.SubscriptionId);
+            await SaveStepResultAsync(step, "cosmos", findings);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, " [COSMOS] Erro na análise para {subscription}. Salvando resultado vazio.", step.SubscriptionId);
+            await SaveStepResultAsync(step, "cosmos", new List<object>());
+        }
+    }
+
     /// <summary>
     ///  STEP FINAL: CONSOLIDATE - Junta todos os resultados parciais
     ///  V2.0: Auto-reschedule se steps não completaram (sem polling bloqueante)
@@ -264,7 +302,7 @@ public class SubscriptionAnalysisStepFunction
         {
             //  NOVA LÓGICA: Verificar se todos os steps estão prontos SEM polling
             var completedSteps = await _storageService.GetCompletedStepsAsync(step.AnalysisId);
-            var requiredSteps = new[] { "storage", "vm", "appservice", "functionapp", "loganalytics", "publicip" };
+            var requiredSteps = new[] { "storage", "vm", "appservice", "functionapp", "loganalytics", "publicip", "sql", "cosmos" };
             var missingSteps = requiredSteps.Except(completedSteps).ToList();
 
             if (missingSteps.Any())
@@ -402,13 +440,13 @@ public class SubscriptionAnalysisStepFunction
 
     private async Task TryTriggerConsolidationAsync(AnalysisStepMessage step)
     {
-        if (step.Step is not ("storage" or "vm" or "appservice" or "functionapp" or "loganalytics" or "publicip"))
+        if (step.Step is not ("storage" or "vm" or "appservice" or "functionapp" or "loganalytics" or "publicip" or "sql" or "cosmos"))
         {
             return;
         }
 
         var completedSteps = await _storageService.GetCompletedStepsAsync(step.AnalysisId);
-        var requiredSteps = new[] { "storage", "vm", "appservice", "functionapp", "loganalytics", "publicip" };
+        var requiredSteps = new[] { "storage", "vm", "appservice", "functionapp", "loganalytics", "publicip", "sql", "cosmos" };
         var allCompleted = requiredSteps.All(required => completedSteps.Contains(required));
         var consolidateAlreadyQueuedOrDone = completedSteps.Contains("consolidate") || completedSteps.Contains("consolidate-requested");
 
@@ -484,7 +522,7 @@ public class SubscriptionAnalysisStepFunction
     private async Task<List<object>> LoadAllStepResultsAsync(AnalysisStepMessage step)
     {
         var allFindings = new List<object>();
-        var stepTypes = new[] { "storage", "vm", "appservice", "functionapp", "loganalytics", "publicip" };
+        var stepTypes = new[] { "storage", "vm", "appservice", "functionapp", "loganalytics", "publicip", "sql", "cosmos" };
 
         foreach (var stepType in stepTypes)
         {

@@ -70,7 +70,7 @@ public class SubscriptionAnalysisQueueFunction
                 _logger.LogInformation(" [QUEUE] Executando análise REAL via orchestrator para {subscriptionId}", subscriptionId);
                 
                 //  EXECUTAR ANÁLISE COMPLETA usando o orchestrator simplificado
-                if (analysisType == "manual-test" || analysisType == "complete" || analysisType == "full")
+                if (analysisType == "manual-test" || analysisType == "complete" || analysisType == "full" || analysisType == "export-refresh")
                 {
                     // Análise completa (todos os analyzers)
                     await _orchestrator.AnalyzeSubscriptionAsync(subscriptionId, "complete", false);

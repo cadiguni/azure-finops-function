@@ -108,9 +108,9 @@ public class UnattachedDiskAnalyzer
 
                 // 💰 CUSTO REAL: Buscar do Cost Management primeiro, fallback para tabela
                 var costData = await _costLookupService.GetResourceCostDataAsync(subscriptionId, resourceId);
-                var dailyCost = costData.DailyCost > 0 ? costData.DailyCost : EstimateDiskMonthlyCostFallback(sku, diskSizeGb) / 30;
-                var estimatedMonthlyCost = costData.MonthlyCost > 0 ? costData.MonthlyCost : EstimateDiskMonthlyCostFallback(sku, diskSizeGb);
-                var costSource = costData.MonthlyCost > 0 ? "cost-management" : "sku-fallback";
+                var dailyCost = costData.DailyCost;
+                var estimatedMonthlyCost = costData.MonthlyCost;
+                var costSource = costData.CostSource;
                 
                 var monthlySavings = estimatedMonthlyCost * 0.98m; // 98% economia ao remover
 
@@ -125,8 +125,10 @@ public class UnattachedDiskAnalyzer
                     SubscriptionId = subscriptionId,
                     DailyCost = dailyCost,
                     EstimatedMonthlyCost = estimatedMonthlyCost,
+                    CostProvenance = costData.Provenance,
+                    ObservedCost = costData.ObservedCost,
                     EstimatedMonthlySavings = monthlySavings,
-                    Currency = "BRL",
+                    Currency = string.IsNullOrWhiteSpace(costData.Currency) ? "BRL" : costData.Currency,
                     Priority = estimatedMonthlyCost > 150 ? FindingPriorities.HIGH : 
                               estimatedMonthlyCost > 60 ? FindingPriorities.MEDIUM : FindingPriorities.LOW,
                     Confidence = 0.95,
@@ -139,6 +141,11 @@ public class UnattachedDiskAnalyzer
                         { "diskSizeGb", diskSizeGb },
                         { "unattachedDays", analysisPeriodDays },
                         { "costSource", costSource },
+                        { "costMatchConfidence", costData.CostMatchConfidence },
+                        { "costMatchedResourceId", costData.CostMatchedResourceId ?? resourceId },
+                        { "costPeriodFrom", costData.CostPeriodFrom ?? DateTime.UtcNow.Date.AddDays(-30) },
+                        { "costPeriodTo", costData.CostPeriodTo ?? DateTime.UtcNow.Date },
+                        { "costNote", costData.CostNote ?? string.Empty },
                         { "realCostFromApi", costData.MonthlyCost }
                     }
                 };
@@ -179,19 +186,7 @@ public class UnattachedDiskAnalyzer
         return result;
     }
 
-    private decimal EstimateDiskMonthlyCostFallback(string sku, int sizeGb)
-    {
-        // Preços aproximados por GB/mês em BRL - FALLBACK quando Cost Management não retorna dados
-        return sku.ToLower() switch
-        {
-            "standard_lrs" => sizeGb * 0.15m,
-            "standard_ssd_lrs" => sizeGb * 0.25m,
-            "premium_lrs" => sizeGb * 0.45m,
-            "standardssd_zrs" => sizeGb * 0.35m,
-            "premium_zrs" => sizeGb * 0.65m,
-            _ => sizeGb * 0.20m // Default
-        };
-    }
+
 
     private Dictionary<string, string> ExtractTags(JsonElement resource)
     {

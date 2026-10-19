@@ -1,106 +1,46 @@
 trigger: none
 
-variables:
-  - template: config.yml
-  - group: Terraform
-  - group: FinOps-func-Portfolio
-  - name: tfvars
-    value: '-var "aplicacao=$(NomeAplicacao)" -var "setor=$(Setor)"'
-  - name: workingDirectory
-    value: '$(System.DefaultWorkingDirectory)/pipelines/terraform-function'
-  - name: terraformVersion
-    value: '1.9.3'
-    
 resources:
   pipelines:
     - pipeline: FinOps-Back-build-function 
       source: FinOps-Platform\FinOps-Back-build-function 
       trigger: true
+  repositories:
+    - repository: DEVOPS
+      type: git
+      name: NAP/_git/DevOps
+      ref: 'refs/tags/backend/v4.7.0'
+
+variables:
+  - template: config.yml
+  - group: FinOps-${{ variables.Ambiente }}-Personal
+  # ServiceBus-* e apim-gateway-* removidos: runServiceBus/runApiGateway estão desligados.
 
 pool: self-hosted-agent-pool
 
 stages:
-- stage: "Deploy_function"
-  displayName: "Deploy Function"
-  jobs:
-  - job: DeployFunction
-    displayName: "Deploy FinOps Function"
-    steps:
-    - task: TerraformInstaller@1
-      displayName: "Install Terraform ${{ variables.terraformVersion }}"
-      inputs:
-        terraformVersion: ${{ variables.terraformVersion }}
-
-    - task: TerraformTaskV4@4
-      displayName: "Terraform Init"
-      inputs:
-        command: "init"
-        backendType: azurerm
-        workingDirectory: '$(System.DefaultWorkingDirectory)/pipelines/terraform-function'
-        backendServiceArm: "$(ServiceConnection)"
-        backendAzureRmResourceGroupName: 'terraform-rg'
-        backendAzureRmStorageAccountName: "personalterraformstate"
-        backendAzureRmContainerName: "personal"
-        backendAzureRmKey: "finops/$(NomeAplicacao).tfstate"
-        commandOptions: ' -backend-config="access_key=$(TerraformAccessKey)" '
-
-    - task: TerraformTaskV4@4
-      displayName: "Terraform Plan"
-      inputs:
-        command: 'plan'
-        provider: 'azurerm'
-        environmentServiceNameAzureRM: "$(ServiceConnection)"
-        workingDirectory: '$(System.DefaultWorkingDirectory)/pipelines/terraform-function'
-        publishPlanResults: "PlanResults"
-        commandOptions: '-input=false ${{ variables.tfvars }} -out=${{ variables.workingDirectory }}/terraform.tfplan -detailed-exitcode '
-
-    - task: TerraformTaskV4@4
-      displayName: "Terraform Apply"
-      inputs:
-        command: 'apply'
-        provider: 'azurerm'
-        environmentServiceNameAzureRM: "$(ServiceConnection)"
-        workingDirectory: '$(System.DefaultWorkingDirectory)/pipelines/terraform-function'
-        commandOptions: '-input=false ${{ variables.tfvars }}'
-        allowTelemetryCollection: true
-
-    - download: FinOps-Back-build-function
-      displayName: 'Baixando artefatos do build da função'
-      artifact: ${{ variables.ArtifactName }} #Nome do artefato que foi publicado no build
-
-    - script: |
-        echo '-------- dir -------'
-        ls *
-        echo '-------- dir Workspace -------'
-        ls $(Pipeline.Workspace)/*
-        echo '-------- verify variable -------'
-        echo "Pipeline.Workspace: $(Pipeline.Workspace)"
-        echo "build.artifactstagingdirectory: $(build.artifactstagingdirectory)"
-        echo "ArtifactName: ${{ variables.ArtifactName }}"
-      displayName: 'Debug variables'
-
-    - script: |
-        echo "Function App Name: $(NomeAplicacao)-$(Setor)-func"
-        echo "NomeAplicacao: $(NomeAplicacao)"
-        echo "Setor: $(Setor)"
-        echo "ServiceConnection: $(ServiceConnection)"
-        # Verificar se a Function App existe
-        az functionapp show --name "$(NomeAplicacao)-$(Setor)-func" --resource-group "$(NomeAplicacao)-$(Setor)-rg" || echo "Function App not found!"
-      displayName: 'Debug Function App'
-
-    - task: AzureFunctionApp@1
-      displayName: 'Publicando artefatos de build da função'
-      inputs:
-        azureSubscription: '$(ServiceConnection)'
-        appType: 'functionApp'
-        appName: '$(NomeAplicacao)-$(Setor)-func'
-        package: "$(Pipeline.Workspace)/FinOps-Back-build-function/${{ variables.ArtifactName }}/${{ variables.ArtifactName }}.zip"
-        appSettings: >-
-          -EnableStorageAnalyzer $(EnableStorageAnalyzer)
-          -EnableVmAnalyzer $(EnableVmAnalyzer)
-          -EnableAppServiceAnalyzer $(EnableAppServiceAnalyzer)
-          -EnablePublicIpAnalyzer $(EnablePublicIpAnalyzer)
-          -EnableDiskAnalyzer $(EnableDiskAnalyzer)
-          -CostAnalysisSchedule "$(CostAnalysisSchedule)"
-          -DailySummarySchedule "$(DailySummarySchedule)" 
-          -RESULTS_CONTAINER_NAME $(RESULTS_CONTAINER_NAME)
+  - template: ./templates/backend/deploy-backend-function.yml@DEVOPS
+    parameters:
+      # O template usa este valor só para montar <NomeAplicacao>-<Ambiente>-func:
+      # prod → finopsplatform-nap-func (legado), hml → finopsplatform-hml-func.
+      Ambiente: '${{ variables.SufixoRecursos }}'
+      ArtifactName: '${{ variables.ArtifactName }}'
+      ServiceConnection: '$(ServiceConnection)'
+      ApiId: 'finops-api'
+      ApiSufixoUrl: ''
+      ApiDisplayName: 'finops-api'
+      swaggerUrl: ''
+      sourcePipeline: 'FinOps-Back-build-function'
+      packageForLinux: '**/*.zip'
+      ServicoMultiTenant: false
+      runServiceBus: false
+      runApiGateway: false
+      code_validate: |
+        validate_not_empty "$(NomeAplicacao)" "NomeAplicacao"
+        validate_not_empty "$(ArtifactName)" "ArtifactName"
+      appType: 'functionAppLinux'
+      # AppSettingsDeploy removido - todas as configurações estão no Terraform
+      # Os parâmetros Enable*Analyzer não são usados pelo código
+      # CostAnalysisSchedule e DailySummarySchedule estão no Terraform
+      # RESULTS_CONTAINER_NAME foi movido para o Terraform
+      AppSettingsDeploy: ''

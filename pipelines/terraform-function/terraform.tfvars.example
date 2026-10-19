@@ -7,3 +7,20 @@ ambiente = "dev"  # dev, hml, prod
 
 # URL do Webhook do Teams (opcional)
 webhookUrlTeams = ""
+
+# Cost Management Exports inicia em shadow para todos os prefixos encontrados; cutover permanece explícito.
+enable_cost_export_import                 = true
+cost_export_import_all_subscriptions      = true
+enable_legacy_cost_by_service_collection  = false
+enable_legacy_cost_by_resource_collection = false
+cost_export_subscription_ids              = []
+cost_export_cutover_subscription_ids      = []
+cost_export_storage_account_uri           = ""
+cost_export_max_manifests_per_run         = 100
+cost_export_anomaly_max_staleness_days    = 3
+
+# Aud real do access token da API (claim aud).
+ownership_auth_allowed_audiences = []
+
+# Reutiliza o container operacional de ownership; não cria container de budgets.
+config_container_name = "finops-config"

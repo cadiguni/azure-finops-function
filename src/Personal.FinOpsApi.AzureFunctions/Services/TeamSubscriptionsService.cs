@@ -27,7 +27,7 @@ namespace Personal.FinOpsApi.AzureFunctions.Services
     /// Serviço simplificado para gerenciar mapeamento de times para subscriptions
     /// Armazena no blob config/team-subscriptions.json
     /// </summary>
-    public class TeamSubscriptionsService
+    public class TeamSubscriptionsService : ILegacyTeamSubscriptionsLookupService
     {
         private readonly BlobServiceClient _blobServiceClient;
         private readonly ILogger<TeamSubscriptionsService> _logger;

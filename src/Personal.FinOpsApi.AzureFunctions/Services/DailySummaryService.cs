@@ -139,7 +139,8 @@ public class DailySummaryService
                                     ResourceName = rec.ResourceName,
                                 SubscriptionId = rec.SubscriptionId,
                                 ResourceGroup = rec.ResourceGroup,
-                                EstimatedMonthlyCost = rec.EstimatedMonthlySavings / 0.7m, // Reverse engineer do custo
+                                    EstimatedMonthlyCost = rec.EstimatedMonthlyCost,
+                                    DailyCost = rec.DailyCost,
                                 PotentialSavings = rec.EstimatedMonthlySavings,
                                 Confidence = rec.Priority == "High" ? "High" : "Medium",
                                 Priority = rec.Priority,

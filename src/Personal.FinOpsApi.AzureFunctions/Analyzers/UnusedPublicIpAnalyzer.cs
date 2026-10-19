@@ -10,11 +10,13 @@ namespace Personal.FinOpsApi.AzureFunctions.Analyzers;
 public class UnusedPublicIpAnalyzer
 {
     private readonly HttpClient _httpClient;
+    private readonly ResourceCostLookupService _costLookupService;
     private readonly ILogger<UnusedPublicIpAnalyzer> _logger;
 
-    public UnusedPublicIpAnalyzer(HttpClient httpClient, ILogger<UnusedPublicIpAnalyzer> logger)
+    public UnusedPublicIpAnalyzer(HttpClient httpClient, ILogger<UnusedPublicIpAnalyzer> logger, ResourceCostLookupService costLookupService)
     {
         _httpClient = httpClient;
+        _costLookupService = costLookupService;
         _logger = logger;
     }
 
@@ -67,11 +69,15 @@ public class UnusedPublicIpAnalyzer
                         ? allocationMethod.GetString() 
                         : "Static";
                     
-                    var monthlyCost = sku == "Static" ? 3.65m : 2.50m; // Standard vs Basic
-                    var monthlySavings = monthlyCost * 0.95m; // 95% economia ao remover
+                    var cost = await _costLookupService.GetResourceCostDataAsync(subscriptionId, resourceId);
+                    var monthlyCost = cost.MonthlyCost;
+                    var monthlySavings = 0m; // Investigation alone does not substantiate realizable savings.
                     
                     var finding = new StandardFinding
                     {
+                        CostProvenance = cost.Provenance,
+                        ObservedCost = cost.ObservedCost,
+                        DailyCost = cost.DailyCost,
                         Type = FindingTypes.UNUSED_PUBLIC_IP,
                         ResourceId = resourceId,
                         ResourceName = ipName,
@@ -81,16 +87,22 @@ public class UnusedPublicIpAnalyzer
                         SubscriptionId = subscriptionId,
                         EstimatedMonthlyCost = monthlyCost,
                         EstimatedMonthlySavings = monthlySavings,
-                        Currency = "BRL",
+                        Currency = cost.Currency,
                         Priority = FindingPriorities.HIGH,
                         Confidence = 0.95,
-                        Description = $"Public IP '{ipName}' não está associado a nenhum recurso há mais de {analysisPeriodDays} dias",
+                        Description = $"Public IP '{ipName}' não possui associação na consulta atual",
                         Recommendation = "Investigar se este IP público ainda é necessário. Verificar se há dependências externas (DNS, firewalls, integrações) antes de qualquer ação.",
                         Tags = ExtractTags(ip),            //  CORRIGIDO: Campo no lugar certo
                         Metadata = new Dictionary<string, object>
                         {
-                            { "sku", sku ?? "Static" },
-                            { "unusedDays", analysisPeriodDays }
+                            { "costSource", cost.CostSource },
+                            { "costMatchConfidence", cost.CostMatchConfidence },
+                            { "costMatchedResourceId", cost.CostMatchedResourceId ?? resourceId },
+                            { "costPeriodFrom", cost.CostPeriodFrom ?? DateTime.UtcNow.Date.AddDays(-30) },
+                            { "costPeriodTo", cost.CostPeriodTo ?? DateTime.UtcNow.Date },
+                            { "costNote", cost.CostNote ?? "" },
+                            { "allocationMethod", sku ?? "Static" },
+                            { "associationObservedAt", DateTime.UtcNow }
                         }
                     };
                     

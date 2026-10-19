@@ -20,7 +20,7 @@
             "messageHandlerOptions": {
                 "maxConcurrentCalls": 1,
                 "autoComplete": false,
-                "maxAutoRenewDuration": "00:05:00"
+                "maxAutoRenewDuration": "00:07:30"
             },
             "retryOptions": {
                 "mode": "exponential",

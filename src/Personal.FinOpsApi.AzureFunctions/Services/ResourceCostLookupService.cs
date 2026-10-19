@@ -5,31 +5,48 @@ using System.Collections.Concurrent;
 namespace Personal.FinOpsApi.AzureFunctions.Services
 {
     /// <summary>
-    /// Dados de custo de um recurso (diário e mensal)
+    /// Dados de custo de um recurso (diário e mensal + origem/confiança do match)
     /// </summary>
-    public record ResourceCostData(decimal DailyCost, decimal MonthlyCost);
+    public record ResourceCostData(
+        decimal DailyCost,
+        decimal MonthlyCost,
+        string Currency = "BRL",
+        DateTime? CostPeriodFrom = null,
+        DateTime? CostPeriodTo = null,
+        string CostSource = CostMatchSources.NotMatched,
+        string CostMatchConfidence = CostMatchConfidenceLevels.Low,
+        string? CostMatchedResourceId = null,
+        string? CostNote = "Não foi possível associar custo para este recurso no período consultado.",
+        CostReadProvenance? Provenance = null,
+        decimal? ObservedCost = null);
 
     /// <summary>
-    /// Serviço para lookup de custos reais por recurso usando Cost Management API
-    /// Faz cache dos custos por subscription para evitar múltiplas chamadas
+    /// Lookup por recurso usando a leitura compartilhada Export-first, com fallback controlado.
+    /// Mantém cache por subscription em lote e resolve match em memória.
     /// </summary>
     public class ResourceCostLookupService
     {
         private readonly ICostManagementClient _costManagementClient;
+        private readonly ICostDataReader _costDataReader;
+        private readonly IResourceCostResolver _resourceCostResolver;
         private readonly ILogger<ResourceCostLookupService> _logger;
-        
-        // Cache: subscriptionId -> (resourceId -> (dailyCost, monthlyCost))
-        private readonly ConcurrentDictionary<string, Dictionary<string, ResourceCostData>> _costCache = new();
+
+        private readonly ConcurrentDictionary<string, SubscriptionCostCache> _costCache = new();
         private readonly ConcurrentDictionary<string, DateTime> _cacheTimestamps = new();
         private readonly SemaphoreSlim _loadSemaphore = new(1, 1);
-        
+
         private const int CacheExpirationMinutes = 30;
+        private const int EmptyCacheExpirationMinutes = 2;
 
         public ResourceCostLookupService(
             ICostManagementClient costManagementClient,
+            ICostDataReader costDataReader,
+            IResourceCostResolver resourceCostResolver,
             ILogger<ResourceCostLookupService> logger)
         {
             _costManagementClient = costManagementClient;
+            _costDataReader = costDataReader;
+            _resourceCostResolver = resourceCostResolver;
             _logger = logger;
         }
 
@@ -50,35 +67,126 @@ namespace Personal.FinOpsApi.AzureFunctions.Services
         /// </summary>
         /// <param name="subscriptionId">ID da subscription</param>
         /// <param name="resourceId">Resource ID completo</param>
-        /// <returns>ResourceCostData com custo diário e mensal projetado</returns>
-        public async Task<ResourceCostData> GetResourceCostDataAsync(string subscriptionId, string resourceId)
+        /// <returns>ResourceCostData com custo diário/mensal e metadados de match</returns>
+        public async Task<ResourceCostData> GetResourceCostDataAsync(string subscriptionId, string resourceId, string? billingParentResourceId = null)
         {
             if (string.IsNullOrEmpty(subscriptionId) || string.IsNullOrEmpty(resourceId))
                 return new ResourceCostData(0, 0);
 
-            // Garantir que temos os custos carregados para esta subscription
-            await EnsureCostsLoadedAsync(subscriptionId);
+            var period = GetDefaultPeriod();
+            var resolution = await ResolveCostAsync(subscriptionId, resourceId, null, null, period.FromUtc, period.ToUtc, useCache: true, billingParentResourceId: billingParentResourceId);
+            return MapToCostData(resolution);
+        }
 
-            // Lookup pelo resourceId (case insensitive)
-            if (_costCache.TryGetValue(subscriptionId.ToLowerInvariant(), out var costs))
+        public async Task<ResourceCostData> GetResourceCostDataAsync(
+            string subscriptionId,
+            string resourceId,
+            string? resourceType,
+            string? resourceGroup,
+            DateTime periodFromUtc,
+            DateTime periodToUtc,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrEmpty(subscriptionId) || string.IsNullOrEmpty(resourceId))
+                return new ResourceCostData(0, 0);
+
+            var resolution = await ResolveCostAsync(
+                subscriptionId,
+                resourceId,
+                resourceType,
+                resourceGroup,
+                periodFromUtc,
+                periodToUtc,
+                useCache: false,
+                cancellationToken: cancellationToken);
+            return MapToCostData(resolution);
+        }
+
+        public async Task<ResourceCostResolution> GetCostMatchDiagnosticsAsync(
+            string resourceId,
+            string periodId,
+            CancellationToken cancellationToken = default)
+        {
+            var normalizedResourceId = _resourceCostResolver.NormalizeResourceId(resourceId);
+            var subscriptionId = ExtractSubscriptionId(normalizedResourceId);
+            if (string.IsNullOrWhiteSpace(subscriptionId))
             {
-                var resourceIdLower = resourceId.ToLowerInvariant();
-                if (costs.TryGetValue(resourceIdLower, out var cost))
+                return new ResourceCostResolution
                 {
-                    return cost;
-                }
-
-                // Tentar match parcial (alguns recursos podem ter IDs ligeiramente diferentes)
-                var partialMatch = costs.Keys.FirstOrDefault(k => 
-                    k.Contains(resourceIdLower) || resourceIdLower.Contains(k));
-                if (partialMatch != null)
-                {
-                    return costs[partialMatch];
-                }
+                    PeriodFromUtc = DateTime.UtcNow.Date.AddDays(-30),
+                    PeriodToUtc = DateTime.UtcNow.Date,
+                    CostSource = CostMatchSources.NotMatched,
+                    CostMatchConfidence = CostMatchConfidenceLevels.Low,
+                    CostNote = "Não foi possível extrair subscriptionId do resourceId.",
+                    Observations = new[] { "ResourceId inválido para diagnóstico." }
+                };
             }
 
-            _logger.LogDebug("💰 Custo não encontrado para {ResourceId}", resourceId);
-            return new ResourceCostData(0, 0);
+            var period = ParsePeriod(periodId);
+            return await ResolveCostAsync(
+                subscriptionId,
+                normalizedResourceId,
+                ExtractResourceType(normalizedResourceId),
+                ExtractResourceGroup(normalizedResourceId),
+                period.FromUtc,
+                period.ToUtc,
+                useCache: false,
+                cancellationToken: cancellationToken);
+        }
+
+        public async Task<IReadOnlyCollection<CostDimensionInfo>> GetAvailableDimensionsAsync(
+            string subscriptionId,
+            CancellationToken cancellationToken = default)
+        {
+            return await _costManagementClient.GetAvailableDimensionsAsync(subscriptionId, cancellationToken);
+        }
+
+        public async Task<IReadOnlyCollection<CostDiagnosticRow>> QueryDiagnosticsRowsAsync(
+            string subscriptionId,
+            DateTime periodFromUtc,
+            DateTime periodToUtc,
+            CancellationToken cancellationToken = default)
+        {
+            var result = await _costDataReader.ReadResourceCostsAsync(subscriptionId, periodFromUtc, periodToUtc, cancellationToken);
+            return result.Rows;
+        }
+
+        private async Task<ResourceCostResolution> ResolveCostAsync(
+            string subscriptionId,
+            string resourceId,
+            string? resourceType,
+            string? resourceGroup,
+            DateTime periodFromUtc,
+            DateTime periodToUtc,
+            bool useCache,
+            CancellationToken cancellationToken = default,
+            string? billingParentResourceId = null)
+        {
+            ResourceCostReadResult read;
+            if (useCache)
+            {
+                await EnsureCostsLoadedAsync(subscriptionId, cancellationToken);
+                read = _costCache.TryGetValue(subscriptionId.ToLowerInvariant(), out var cache)
+                    ? cache.ReadResult
+                    : new ResourceCostReadResult();
+            }
+            else
+            {
+                read = await _costDataReader.ReadResourceCostsAsync(subscriptionId, periodFromUtc, periodToUtc, cancellationToken);
+            }
+
+            var context = new ResourceCostResolveContext
+            {
+                ResourceId = resourceId,
+                BillingParentResourceId = billingParentResourceId,
+                ResourceType = string.IsNullOrWhiteSpace(resourceType) ? ExtractResourceType(resourceId) : resourceType,
+                ResourceGroup = string.IsNullOrWhiteSpace(resourceGroup) ? ExtractResourceGroup(resourceId) : resourceGroup,
+                SubscriptionId = subscriptionId
+            };
+
+            var resolution = _resourceCostResolver.Resolve(context, read.Rows, periodFromUtc, periodToUtc);
+            resolution.Provenance = read.Provenance;
+            return resolution;
         }
 
         /// <summary>
@@ -87,21 +195,26 @@ namespace Personal.FinOpsApi.AzureFunctions.Services
         public async Task<Dictionary<string, ResourceCostData>> GetResourceCostsAsync(string subscriptionId, IEnumerable<string> resourceIds)
         {
             await EnsureCostsLoadedAsync(subscriptionId);
-            
+
             var results = new Dictionary<string, ResourceCostData>(StringComparer.OrdinalIgnoreCase);
-            
-            if (_costCache.TryGetValue(subscriptionId.ToLowerInvariant(), out var costs))
+            var period = GetDefaultPeriod();
+            if (_costCache.TryGetValue(subscriptionId.ToLowerInvariant(), out var cache))
             {
                 foreach (var resourceId in resourceIds)
                 {
-                    var resourceIdLower = resourceId.ToLowerInvariant();
-                    if (costs.TryGetValue(resourceIdLower, out var cost))
+                    var context = new ResourceCostResolveContext
                     {
-                        results[resourceId] = cost;
-                    }
+                        ResourceId = resourceId,
+                        ResourceType = ExtractResourceType(resourceId),
+                        ResourceGroup = ExtractResourceGroup(resourceId),
+                        SubscriptionId = subscriptionId
+                    };
+                    var resolution = _resourceCostResolver.Resolve(context, cache.ReadResult.Rows, period.FromUtc, period.ToUtc);
+                    resolution.Provenance = cache.ReadResult.Provenance;
+                    results[resourceId] = MapToCostData(resolution);
                 }
             }
-            
+
             return results;
         }
 
@@ -123,114 +236,286 @@ namespace Personal.FinOpsApi.AzureFunctions.Services
             _logger.LogInformation("💰 Cache de custos limpo");
         }
 
-        private async Task EnsureCostsLoadedAsync(string subscriptionId)
+        private async Task EnsureCostsLoadedAsync(string subscriptionId, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var subscriptionIdLower = subscriptionId.ToLowerInvariant();
 
             // Verificar se já está em cache e não expirou
             if (_cacheTimestamps.TryGetValue(subscriptionIdLower, out var timestamp))
             {
-                if (DateTime.UtcNow - timestamp < TimeSpan.FromMinutes(CacheExpirationMinutes))
+                if (DateTime.UtcNow - timestamp < TimeSpan.FromMinutes(CacheExpirationMinutes)
+                    && _costCache.TryGetValue(subscriptionIdLower, out var cached) && cached.PeriodToUtc == GetDefaultPeriod().ToUtc)
                 {
                     return; // Cache ainda válido
                 }
             }
 
-            await _loadSemaphore.WaitAsync();
+            await _loadSemaphore.WaitAsync(cancellationToken);
             try
             {
                 // Double-check após obter o lock
                 if (_cacheTimestamps.TryGetValue(subscriptionIdLower, out timestamp))
                 {
-                    if (DateTime.UtcNow - timestamp < TimeSpan.FromMinutes(CacheExpirationMinutes))
+                    if (DateTime.UtcNow - timestamp < TimeSpan.FromMinutes(CacheExpirationMinutes)
+                        && _costCache.TryGetValue(subscriptionIdLower, out var cached) && cached.PeriodToUtc == GetDefaultPeriod().ToUtc)
                     {
                         return;
                     }
                 }
 
-                _logger.LogInformation("💰 Carregando custos do Cost Management para subscription {SubscriptionId}", subscriptionId);
+                _logger.LogInformation("💰 Carregando custos Export-first para subscription {SubscriptionId}", subscriptionId);
 
-                // Buscar dados dos últimos 30 dias COM granularidade diária para calcular média real
-                var endDate = DateTime.UtcNow.Date;
-                var startDate = endDate.AddDays(-30);
+                var period = GetDefaultPeriod();
+                var read = await _costDataReader.ReadResourceCostsAsync(subscriptionId, period.FromUtc, period.ToUtc, cancellationToken);
+                var rows = read.Rows;
 
-                var response = await _costManagementClient.QueryCostByResourceAsync(
-                    subscriptionId,
-                    startDate,
-                    endDate,
-                    "Daily", // ⚡ Granularidade DIÁRIA para calcular média correta
-                    null,    // Sem filtro de serviço
-                    CancellationToken.None);
-
-                // Agrupar por recurso e calcular média diária REAL (baseada nos dias com dados)
                 var costsByResource = new Dictionary<string, ResourceCostData>(StringComparer.OrdinalIgnoreCase);
-                var dayCountByResource = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-                var totalCostByResource = new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase);
-                
-                // Primeiro: agrupar custos por recurso (sem filtrar por valor ainda)
-                foreach (var row in response.Rows)
-                {
-                    if (string.IsNullOrEmpty(row.ResourceId))
-                        continue;
+                var resourceGroups = rows
+                    .Where(r => !string.IsNullOrWhiteSpace(r.ResourceId))
+                    .GroupBy(r => _resourceCostResolver.NormalizeResourceId(r.ResourceId));
 
-                    var resourceIdLower = row.ResourceId.ToLowerInvariant();
-                    
-                    // Acumular custo total
-                    if (!totalCostByResource.ContainsKey(resourceIdLower))
+                foreach (var group in resourceGroups)
+                {
+                    var context = new ResourceCostResolveContext
                     {
-                        totalCostByResource[resourceIdLower] = 0;
-                        dayCountByResource[resourceIdLower] = 0;
-                    }
-                    
-                    // Só conta dias com custo significativo (> R$ 0.10)
-                    // Isso evita que dias com custo mínimo inflem a contagem
-                    if (row.TotalCost > 0.10m)
-                    {
-                        totalCostByResource[resourceIdLower] += row.TotalCost;
-                        dayCountByResource[resourceIdLower]++;
-                    }
+                        ResourceId = group.Key,
+                        ResourceType = group.First().ResourceType,
+                        ResourceGroup = group.First().ResourceGroupName,
+                        SubscriptionId = subscriptionId
+                    };
+                    var resolution = _resourceCostResolver.Resolve(context, rows, period.FromUtc, period.ToUtc);
+                    resolution.Provenance = read.Provenance;
+                    costsByResource[group.Key] = MapToCostData(resolution);
                 }
 
-                // Calcular custo diário médio e projeção mensal
-                foreach (var kvp in totalCostByResource)
+                _costCache[subscriptionIdLower] = new SubscriptionCostCache
                 {
-                    var resourceId = kvp.Key;
-                    var totalCost = kvp.Value;
-                    var daysWithData = dayCountByResource[resourceId];
-                    
-                    // Se não tem dias com custo significativo, pular
-                    if (daysWithData == 0 || totalCost <= 0)
-                        continue;
-                    
-                    // Média diária real = total / dias com dados significativos
-                    var dailyCost = Math.Round(totalCost / daysWithData, 2);
-                    
-                    // Projeção mensal = média diária * 30
-                    var monthlyCost = Math.Round(dailyCost * 30, 2);
-                    
-                    costsByResource[resourceId] = new ResourceCostData(dailyCost, monthlyCost);
-                    
-                    _logger.LogInformation("💰 {ResourceName}: Total R$ {Total:N2} em {Days} dias = R$ {Daily:N2}/dia → ~R$ {Monthly:N2}/mês",
-                        resourceId.Split('/').LastOrDefault(), totalCost, daysWithData, dailyCost, monthlyCost);
-                }
+                    ReadResult = read,
+                    CostsByNormalizedResourceId = costsByResource,
+                    PeriodFromUtc = period.FromUtc,
+                    PeriodToUtc = period.ToUtc
+                };
+                _cacheTimestamps[subscriptionIdLower] = rows.Count == 0
+                    ? DateTime.UtcNow.AddMinutes(-(CacheExpirationMinutes - EmptyCacheExpirationMinutes))
+                    : DateTime.UtcNow;
 
-                _costCache[subscriptionIdLower] = costsByResource;
-                _cacheTimestamps[subscriptionIdLower] = DateTime.UtcNow;
+                LogSqlAndCosmosDiagnostics(subscriptionId, rows);
 
-                _logger.LogInformation("💰 Carregados custos de {Count} recursos para subscription {SubscriptionId}. Total mensal projetado: R$ {Total:N2}", 
+                _logger.LogInformation("💰 Carregados custos de {Count} recursos para subscription {SubscriptionId}. Total mensal projetado: R$ {Total:N2}",
                     costsByResource.Count, subscriptionId, costsByResource.Values.Sum(c => c.MonthlyCost));
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogWarning(ex, "💰 Falha ao carregar custos do Cost Management para {SubscriptionId}. Usando fallback.", subscriptionId);
-                // Em caso de falha, colocar cache vazio para não ficar tentando repetidamente
-                _costCache[subscriptionIdLower] = new Dictionary<string, ResourceCostData>();
-                _cacheTimestamps[subscriptionIdLower] = DateTime.UtcNow;
+                _logger.LogWarning(ex, "💰 Falha nas fontes de custo para {SubscriptionId}. Custos indisponíveis.", subscriptionId);
+                // Evita uma rajada imediata de novas consultas, sem congelar a falha por 30 minutos.
+                _costCache[subscriptionIdLower] = new SubscriptionCostCache
+                {
+                    ReadResult = new ResourceCostReadResult
+                    {
+                        Provenance = new CostReadProvenance
+                        {
+                            Source = "Unavailable", FallbackReason = ex.Message,
+                            RequestedFrom = GetDefaultPeriod().FromUtc, RequestedTo = GetDefaultPeriod().ToUtc
+                        }
+                    },
+                    CostsByNormalizedResourceId = new Dictionary<string, ResourceCostData>(StringComparer.OrdinalIgnoreCase),
+                    PeriodFromUtc = DateTime.UtcNow.Date.AddDays(-30),
+                    PeriodToUtc = DateTime.UtcNow.Date
+                };
+                _cacheTimestamps[subscriptionIdLower] =
+                    DateTime.UtcNow.AddMinutes(-(CacheExpirationMinutes - EmptyCacheExpirationMinutes));
             }
             finally
             {
                 _loadSemaphore.Release();
             }
+        }
+
+        private static ResourceCostData MapToCostData(ResourceCostResolution resolution)
+        {
+            var costNote = string.Equals(resolution.Provenance?.Source, "Unavailable", StringComparison.OrdinalIgnoreCase)
+                ? "Custo temporariamente indisponível: o Export e o fallback da Query API falharam. O último valor válido será preservado."
+                : resolution.CostNote;
+            return new ResourceCostData(
+                resolution.DailyCost,
+                resolution.MonthlyCost,
+                resolution.Currency,
+                resolution.PeriodFromUtc,
+                resolution.PeriodToUtc,
+                resolution.CostSource,
+                resolution.CostMatchConfidence,
+                resolution.CostMatchedResourceId,
+                costNote,
+                resolution.Provenance,
+                resolution.BestMatch?.TotalCost);
+        }
+
+        private static CostQueryPeriod GetDefaultPeriod()
+        {
+            var to = DateTime.UtcNow.Date;
+            return new CostQueryPeriod
+            {
+                FromUtc = to.AddDays(-30),
+                ToUtc = to
+            };
+        }
+
+        private static CostQueryPeriod ParsePeriod(string? periodId)
+        {
+            if (string.IsNullOrWhiteSpace(periodId))
+            {
+                return GetDefaultPeriod();
+            }
+
+            // A month identifier has no timezone. AssumeUniversal may shift midnight to the prior month locally.
+            if (DateTime.TryParseExact(periodId, "yyyy-MM", System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var month))
+            {
+                var from = new DateTime(month.Year, month.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+                return new CostQueryPeriod
+                {
+                    FromUtc = from,
+                    ToUtc = from.AddMonths(1).AddDays(-1)
+                };
+            }
+
+            var parts = periodId.Split(':', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (parts.Length == 2
+                && DateTime.TryParse(parts[0], out var fromDate)
+                && DateTime.TryParse(parts[1], out var toDate))
+            {
+                return new CostQueryPeriod
+                {
+                    FromUtc = fromDate.Date,
+                    ToUtc = toDate.Date
+                };
+            }
+
+            return GetDefaultPeriod();
+        }
+
+        private static string ExtractSubscriptionId(string resourceId)
+        {
+            var parts = resourceId.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            for (var i = 0; i < parts.Length - 1; i++)
+            {
+                if (parts[i].Equals("subscriptions", StringComparison.OrdinalIgnoreCase))
+                {
+                    return parts[i + 1];
+                }
+            }
+
+            return string.Empty;
+        }
+
+        private static string ExtractResourceGroup(string resourceId)
+        {
+            var parts = resourceId.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            for (var i = 0; i < parts.Length - 1; i++)
+            {
+                if (parts[i].Equals("resourceGroups", StringComparison.OrdinalIgnoreCase))
+                {
+                    return parts[i + 1];
+                }
+            }
+
+            return string.Empty;
+        }
+
+        private static string ExtractResourceType(string resourceId)
+        {
+            var parts = resourceId.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            var providersIndex = Array.FindIndex(parts, p => p.Equals("providers", StringComparison.OrdinalIgnoreCase));
+            if (providersIndex < 0 || providersIndex + 2 >= parts.Length)
+            {
+                return string.Empty;
+            }
+
+            var typeParts = new List<string> { parts[providersIndex + 1] };
+            for (var i = providersIndex + 2; i < parts.Length; i += 2)
+            {
+                typeParts.Add(parts[i]);
+            }
+
+            return string.Join('/', typeParts);
+        }
+
+
+        private void LogSqlAndCosmosDiagnostics(string subscriptionId, IReadOnlyCollection<CostDiagnosticRow> rows)
+        {
+            var sqlRows = rows.Where(r =>
+                    ContainsAny(r.ResourceType, "microsoft.sql")
+                    || ContainsAny(r.ServiceName, "sql")
+                    || ContainsAny(r.MeterCategory, "sql")
+                    || ContainsAny(r.MeterSubCategory, "sql database"))
+                .Take(20)
+                .ToList();
+
+            var cosmosRows = rows.Where(r =>
+                    ContainsAny(r.ResourceType, "microsoft.documentdb")
+                    || ContainsAny(r.ServiceName, "cosmos", "documentdb")
+                    || ContainsAny(r.MeterCategory, "cosmos", "documentdb")
+                    || ContainsAny(r.MeterSubCategory, "cosmos", "documentdb"))
+                .Take(20)
+                .ToList();
+
+            _logger.LogInformation(
+                "[COST-DIAG] SQL candidates ({SubscriptionId}): {Count}",
+                subscriptionId,
+                sqlRows.Count);
+            foreach (var row in sqlRows)
+            {
+                _logger.LogInformation(
+                    "[COST-DIAG] SQL row -> resourceId={ResourceId}, resourceType={ResourceType}, rg={Rg}, service={ServiceName}, meter={MeterCategory}/{MeterSubCategory}, cost={Cost:N2} {Currency}",
+                    row.ResourceId,
+                    row.ResourceType,
+                    row.ResourceGroupName,
+                    row.ServiceName,
+                    row.MeterCategory,
+                    row.MeterSubCategory,
+                    row.TotalCost,
+                    row.Currency);
+            }
+
+            _logger.LogInformation(
+                "[COST-DIAG] Cosmos candidates ({SubscriptionId}): {Count}",
+                subscriptionId,
+                cosmosRows.Count);
+            foreach (var row in cosmosRows)
+            {
+                _logger.LogInformation(
+                    "[COST-DIAG] Cosmos row -> resourceId={ResourceId}, resourceType={ResourceType}, rg={Rg}, service={ServiceName}, meter={MeterCategory}/{MeterSubCategory}, cost={Cost:N2} {Currency}",
+                    row.ResourceId,
+                    row.ResourceType,
+                    row.ResourceGroupName,
+                    row.ServiceName,
+                    row.MeterCategory,
+                    row.MeterSubCategory,
+                    row.TotalCost,
+                    row.Currency);
+            }
+        }
+
+        private static bool ContainsAny(string value, params string[] terms)
+        {
+            foreach (var term in terms)
+            {
+                if (value.Contains(term, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private sealed class SubscriptionCostCache
+        {
+            public ResourceCostReadResult ReadResult { get; init; } = new();
+            public Dictionary<string, ResourceCostData> CostsByNormalizedResourceId { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+            public DateTime PeriodFromUtc { get; init; }
+            public DateTime PeriodToUtc { get; init; }
         }
     }
 }
